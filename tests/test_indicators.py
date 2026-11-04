@@ -453,3 +453,23 @@ def test_ambient_heat_node_balances_when_agriculture_is_split_out(
     # The correction still happened: 4.0 of rural ambient minus 0.5 agricultural.
     assert result.flows[("pac_fe", "res", "gr")].iloc[0] == pytest.approx(3.5)
     assert result.flows[("pac_pe", "pac_fe", "")].iloc[0] == pytest.approx(6.0)
+
+
+def test_process_nodes_main_input_balances():
+    """Methanolisation, Haber-Bosch, electrobiofuels: inputs = outputs."""
+    import pandas as pd
+    from pypsa2html.indicators import PROCESS_NODES, _close_process_nodes
+
+    cols = pd.MultiIndex.from_tuples(
+        [
+            ("elc_se", "mtn", ""), ("mtn", "met_fe", ""), ("mtn", "per", ""), ("mtn", "vap_se", ""),
+            ("hyd_se", "hbn", ""), ("hbn", "amm_fe", ""), ("hbn", "per", ""),
+            ("hyd_se", "ebf", ""), ("ebf", "pet_fe", "bio"), ("ebf", "per", ""),
+        ],
+        names=("Source", "Target", "Type"),
+    )
+    flows = pd.DataFrame([[54.0, 200.0, 77.0, 5.0, 10.0, 8.0, 4.0, 3.0, 6.0, 2.0]], index=[2050], columns=cols)
+    _close_process_nodes(flows)
+    assert flows[PROCESS_NODES["mtn"]].iloc[0] == 228.0
+    assert flows[PROCESS_NODES["hbn"]].iloc[0] == 2.0
+    assert flows[PROCESS_NODES["ebf"]].iloc[0] == 5.0

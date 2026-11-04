@@ -113,11 +113,12 @@ def test_energy_sankey_unresolved_edges_do_not_increase(tax, produced_codes):
     """
     referenced = set(tax.processes_energy["Value_Code"].dropna())
     # 200: +1 for `prenatbev` (pypsa-wal natural charging; négaWatt has no split).
-    # 209: +9 for current PyPSA-Eur carriers absent from the négaWatt reference
-    # (CAN-CLIMACT): biomass-to-methanol (2), three heat vents, oil-refining
-    # losses, bioliquids, PHS losses, and `hydmtn` (H2 into the methanolisation
-    # process node, computed when the graph is closed).
-    assert len(referenced - produced_codes) <= 209
+    # 212: +12 for CAN-CLIMACT (current PyPSA-Eur carriers absent from the
+    # négaWatt reference): biomass-to-methanol (2), three heat vents, oil-refining
+    # losses, bioliquids, PHS losses, and the main inputs of the process nodes
+    # (`hydmtn`, `elchbn`, `encebf`, computed when the graph is closed) plus
+    # `hbnh2` (Haber-Bosch hydrogen input, its own code).
+    assert len(referenced - produced_codes) <= 212
 
 
 def test_value_codes_reused_across_edges_are_known(tax):

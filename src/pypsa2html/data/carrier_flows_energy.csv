@@ -152,7 +152,7 @@ naphtha for industry_3,oil to process emissions,TWh,prespetcfprodoil
 waste CHP_2,waste CHP to heat,TWh,prbvapchpwst
 waste CHP CC_2,waste CHP CC to heat,TWh,prewstvapcc
 HVC to air,HVC to air losses,TWh,prelosshvc
-Haber-Bosch_4,Production of ammonia from H2),TWh,prohydclamm
+Haber-Bosch_4,hydrogen input of Haber-Bosch,TWh,hbnh2
 biomass to liquid CC_2,biomass to liquid CC losses,TWh,probmliqloscc
 electricity distribution grid,electricity distribution grid losses,TWh,prelcdistloss
 electrobiofuels,electrobiofuels,TWh,probmelcbio

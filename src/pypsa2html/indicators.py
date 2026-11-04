@@ -273,6 +273,14 @@ class _CarrierMix:
     other: tuple[str, ...] = ()
 
 
+#: Multi-input conversions drawn as process nodes: node -> its main-input edge
+#: (bus0 of the link), derived when the graph is closed.
+PROCESS_NODES: dict[str, FlowKey] = {
+    "mtn": ("hyd_se", "mtn", ""),  # methanolisation: H2 (main) + electricity
+    "hbn": ("elc_se", "hbn", ""),  # Haber-Bosch: electricity (main) + H2
+    "ebf": ("enc_pe", "ebf", ""),  # electrobiofuels: solid biomass (main) + H2
+}
+
 #: The renewable share of each final carrier.  The first five reproduce the
 #: legacy denominators exactly; the last four had none worth reproducing.
 RENEWABLE_SHARES: tuple[_CarrierMix, ...] = (
@@ -291,7 +299,7 @@ RENEWABLE_SHARES: tuple[_CarrierMix, ...] = (
     _CarrierMix(
         "pet_fe",
         ("pet_fe", "lqf_se"),
-        renewable=("enc_pe", "hyd_se"),
+        renewable=("enc_pe", "hyd_se", "ebf", "oth_pe"),
         other=("pet_pe",),
     ),
     _CarrierMix(
@@ -308,8 +316,8 @@ RENEWABLE_SHARES: tuple[_CarrierMix, ...] = (
     ),
     _CarrierMix("enc_fe", ("enc_fe",), renewable=("enc_pe",)),
     _CarrierMix("pac_fe", ("pac_fe",), renewable=("pac_pe",)),
-    _CarrierMix("amm_fe", ("amm_fe",), renewable=("elc_se", "hyd_se", "imp")),
-    _CarrierMix("met_fe", ("met_fe",), renewable=("elc_se", "hyd_se", "imp")),
+    _CarrierMix("amm_fe", ("amm_fe",), renewable=("elc_se", "hyd_se", "imp", "hbn")),
+    _CarrierMix("met_fe", ("met_fe",), renewable=("elc_se", "hyd_se", "imp", "mtn", "enc_pe")),
 )
 
 
@@ -882,6 +890,23 @@ def _measured_electricity_trade(ctx, node: str, years) -> tuple[pd.Series, pd.Se
     return (imports, exports) if seen else None
 
 
+def _close_process_nodes(flows: pd.DataFrame) -> pd.DataFrame:
+    """Set the main input of every process node in ``flows`` (in place).
+
+    A link with several energy inputs is drawn inputs -> process -> outputs.  The
+    extraction reports its outputs, losses and secondary inputs; the main input
+    (bus0) is what the outputs need beyond the secondary inputs.
+    """
+    years = flows.index
+    for process, main_input in PROCESS_NODES.items():
+        outgoing = [key for key in flows.columns if key[0] == process]
+        incoming = [key for key in flows.columns if key[1] == process and key != main_input]
+        flows[main_input] = sum(
+            (column(flows, key) for key in outgoing), _zeros(years)
+        ) - sum((column(flows, key) for key in incoming), _zeros(years))
+    return flows
+
+
 def _close_energy_graph(ctx, node: str, flows: pd.DataFrame) -> pd.DataFrame:
     """Derive the flows the model does not report directly.
 
@@ -911,15 +936,8 @@ def _close_energy_graph(ctx, node: str, flows: pd.DataFrame) -> pd.DataFrame:
         flows, ("pac_fe", "agr", "")
     )
 
-    # -- 0b. methanolisation as a process node ------------------------------
-    # Inputs H2 and electricity, outputs methanol, heat and losses.  The link
-    # reports its outputs and its electricity input; the hydrogen input (its
-    # main port) is what the outputs need beyond the electricity.
-    process_out = sum(
-        (column(flows, ("mtn", target, "")) for target in ("met_fe", "vap_se", "per")),
-        _zeros(years),
-    )
-    flows[("hyd_se", "mtn", "")] = process_out - column(flows, ("elc_se", "mtn", ""))
+    # -- 0b. multi-input conversions as process nodes ---------------------
+    _close_process_nodes(flows)
 
     # -- 1. deliveries from the networks to final use ----------------------
     fec = fe_consumption()
@@ -930,7 +948,7 @@ def _close_energy_graph(ctx, node: str, flows: pd.DataFrame) -> pd.DataFrame:
     demand = fec.get("pet_fe", _zeros(years))
     fischer = column(flows, ("hyd_se", "pet_fe", ""))
     biomass_liquid = column(flows, ("enc_pe", "pet_fe", ""))
-    electro_biofuel = column(flows, ("enc_pe", "pet_fe", "bio"))
+    electro_biofuel = column(flows, ("ebf", "pet_fe", "bio"))
     # Bioliquids supplied as such (PyPSA-Eur ``unsustainable bioliquids``): not fossil.
     bioliquids = column(flows, ("oth_pe", "pet_fe", ""))
     synthetic = fischer + biomass_liquid + electro_biofuel + bioliquids
@@ -1104,7 +1122,8 @@ def _close_carbon_graph(
     # -- methanol trade carries its embodied CO2 ---------------------------
     if not aggregate and np.isfinite(methanol_co2):
         demand = fe_use.get("met_fe", _zeros(years))
-        produced = column(flows, ("hyd_se", "met_fe", ""))
+        # methanolisation (process node) and biomass-to-methanol
+        produced = column(flows, ("mtn", "met_fe", "")) + column(flows, ("enc_pe", "met_fe", ""))
         flows_co2[("hth_ghg", "met_ghg", "")] = (demand - produced) * methanol_co2
         flows_co2[("met_ghg", "eth_ghg", "")] = (produced - demand) * methanol_co2
 
@@ -1284,7 +1303,8 @@ class Indicators:
         renewable_liquid = (
             column(self.flows, ("enc_pe", "pet_fe", ""))
             + column(self.flows, ("hyd_se", "pet_fe", ""))
-            + column(self.flows, ("enc_pe", "pet_fe", "bio"))
+            + column(self.flows, ("ebf", "pet_fe", "bio"))
+            + column(self.flows, ("oth_pe", "pet_fe", ""))
         )
         fossil_liquid = column(self.flows, ("pet_pe", "pet_fe", ""))
         ratios["pet_fe"] = 100 * renewable_liquid / (fossil_liquid + renewable_liquid)
