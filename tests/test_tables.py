@@ -256,3 +256,26 @@ def test_sanitize_prices_drops_empty_bus_duals():
     assert pd.isna(out.iloc[2])
     assert pd.isna(out.iloc[3])
     assert out.iloc[4] == pytest.approx(-20.0)
+
+
+def test_parse_nodal_csv_single_header_layout():
+    """Current PyPSA-Eur writes one header row: meta fields, then the years."""
+    raw = pd.read_csv(
+        pd.io.common.StringIO(
+            "cost,component,location,carrier,2030,2040\n"
+            "capital,Generator,BE0 0AC,onwind,1.5,2.5\n"
+            "marginal,Link,NL0 1AC,CCGT,3.0,\n"
+        ),
+        header=None,
+    )
+    out = parse_nodal_csv(raw)
+    assert list(out.columns) == ["cost", "component", "location", "carrier", "2030", "2040"]
+    assert out["2030"].tolist() == [1.5, 3.0]
+    assert out.loc[1, "location"] == "NL0 1AC"
+    assert pd.isna(out.loc[1, "2040"])
+
+
+def test_parse_nodal_csv_without_years_fails():
+    raw = pd.read_csv(pd.io.common.StringIO("component,location\nLink,BE\n"), header=None)
+    with pytest.raises(ValueError):
+        parse_nodal_csv(raw)

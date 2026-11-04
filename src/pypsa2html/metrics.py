@@ -878,6 +878,10 @@ def _is_number(value) -> bool:
     return not np.isnan(number)
 
 
+def _is_year(value) -> bool:
+    return _is_number(value) and float(value).is_integer() and 1900 <= float(value) <= 2200
+
+
 def parse_pypsa_summary(raw: pd.DataFrame) -> pd.DataFrame | None:
     """A PyPSA-Eur summary CSV (``metrics.csv``, ``costs.csv``, ...) as rows x years.
 
@@ -888,9 +892,13 @@ def parse_pypsa_summary(raw: pd.DataFrame) -> pd.DataFrame | None:
     """
     first = raw.iloc[:, 0].astype(str).str.strip()
     hits = list(first.index[first == "planning_horizon"])
-    if not hits:
+    if hits:
+        p = raw.index.get_loc(hits[0])
+    elif len(raw) and any(_is_year(v) for v in raw.iloc[0]):
+        # Current PyPSA-Eur: one header row, index columns then the years.
+        p = 0
+    else:
         return None
-    p = raw.index.get_loc(hits[0])
     header = raw.iloc[p]
     year_cols = [j for j in range(1, raw.shape[1]) if _is_number(header.iloc[j])]
     if not year_cols:

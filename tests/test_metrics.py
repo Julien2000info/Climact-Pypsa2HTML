@@ -444,3 +444,11 @@ def test_after_places_a_project_kpi_under_its_anchor():
     assert ids[i + 1: i + 3] == ["x1", "x2"]
     with pytest.raises(ValueError, match="names no KPI"):
         load_kpis([{"id": "y", "source": "capacity", "after": "nope"}])
+
+
+def test_parse_pypsa_summary_single_header_layout():
+    """Current PyPSA-Eur metrics.csv: one header row with the years."""
+    csv = ",2030,2040\nelectricity_price_mean,64.1,60.6\nco2_shadow,0.0,1.0\n"
+    table = parse_pypsa_summary(pd.read_csv(pd.io.common.StringIO(csv), header=None))
+    assert list(table.columns) == ["2030", "2040"]
+    assert table.loc["electricity_price_mean", "2040"] == pytest.approx(60.6)

@@ -310,11 +310,14 @@ def _horizon_fragment(title: str, images: list[tuple[int, str]]) -> str:
 
 def _geojson_path(ctx) -> Path | None:
     clusters = getattr(ctx.config.model, "clusters", "adm")
-    path = Path(ctx.resources_dir) / f"regions_onshore_base_s_{clusters}.geojson"
-    if not path.exists():
-        logger.warning("regions geojson not found: %s", path)
-        return None
-    return path
+    # Clustered onshore regions: legacy name, then current PyPSA-Eur (no wildcards).
+    names = [f"regions_onshore_base_s_{clusters}.geojson", "onshore_regions.geojson"]
+    for name in names:
+        path = Path(ctx.resources_dir) / name
+        if path.exists():
+            return path
+    logger.warning("regions geojson not found: none of %s under %s", names, ctx.resources_dir)
+    return None
 
 
 def _load_regions(ctx) -> gpd.GeoDataFrame | None:

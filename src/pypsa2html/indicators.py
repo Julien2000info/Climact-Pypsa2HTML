@@ -85,6 +85,7 @@ from collections.abc import Iterable, Sequence
 from copy import copy
 from dataclasses import dataclass
 from functools import cached_property
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -769,9 +770,13 @@ def biomass_potential(ctx, node: str, years: Sequence[int]) -> pd.Series | None:
     clusters = ctx.config.model.clusters
     values: dict[int, float] = {}
     for year in years:
-        raw = ctx.read_csv(
-            f"biomass_potentials_s_{clusters}_{year}.csv", base="resources", index_col=0
-        )
+        # Legacy name, then current PyPSA-Eur (no cluster wildcard).
+        for name in (f"biomass_potentials_s_{clusters}_{year}.csv", f"biomass_potentials_{year}.csv"):
+            if (Path(ctx.resources_dir) / name).exists():
+                raw = ctx.read_csv(name, base="resources", index_col=0)
+                break
+        else:
+            raw = None
         if raw is None:
             continue
         available = [c for c in BIOMASS_POTENTIAL_COLUMNS if c in raw.columns]

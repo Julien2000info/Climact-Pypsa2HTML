@@ -119,7 +119,7 @@ def parse_nodal_csv(raw: pd.DataFrame) -> pd.DataFrame:
     labels = raw.iloc[:, 0].astype(str)
     ph_hits = labels[labels == "planning_horizon"]
     if ph_hits.empty:
-        raise ValueError("nodal CSV has no 'planning_horizon' header row")
+        return _parse_flat_nodal_csv(raw)
     ph_idx = int(ph_hits.index[0])
     header_idx = ph_idx + 1
     if header_idx >= len(raw):
@@ -152,6 +152,46 @@ def parse_nodal_csv(raw: pd.DataFrame) -> pd.DataFrame:
         meta_cols.append((j, str(name).strip()))
 
     body = raw.iloc[header_idx + 1 :].copy()
+    out = pd.DataFrame({name: body.iloc[:, j].to_numpy() for j, name in meta_cols})
+    for year, j in zip(years, year_cols, strict=True):
+        out[year] = pd.to_numeric(body.iloc[:, j].to_numpy(), errors="coerce")
+    return out.reset_index(drop=True)
+
+
+def _year_label(value) -> str | None:
+    """``"2030"`` for a header cell holding a year (read as text or as a number)."""
+    try:
+        number = float(str(value).strip())
+    except ValueError:
+        return None
+    if number.is_integer() and 1900 <= number <= 2200:
+        return str(int(number))
+    return None
+
+
+def _parse_flat_nodal_csv(raw: pd.DataFrame) -> pd.DataFrame:
+    """Single-header layout of current PyPSA-Eur (``make_summary`` since 2025).
+
+    One header row: the meta fields (``cost``, ``component``, ``location``,
+    ``carrier``, …) followed by one column per planning horizon, named by its
+    year. As for the multi-header layout, horizons come from the header only.
+    """
+    year_cols: list[int] = []
+    years: list[str] = []
+    meta_cols: list[tuple[int, str]] = []
+    for j, value in enumerate(raw.iloc[0]):
+        year = _year_label(value)
+        if year is not None:
+            years.append(year)
+            year_cols.append(j)
+        elif pd.notna(value) and str(value).strip():
+            meta_cols.append((j, str(value).strip()))
+    if not years:
+        raise ValueError(
+            "nodal CSV has neither a 'planning_horizon' header row nor year columns"
+        )
+
+    body = raw.iloc[1:]
     out = pd.DataFrame({name: body.iloc[:, j].to_numpy() for j, name in meta_cols})
     for year, j in zip(years, year_cols, strict=True):
         out[year] = pd.to_numeric(body.iloc[:, j].to_numpy(), errors="coerce")

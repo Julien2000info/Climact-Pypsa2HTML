@@ -498,9 +498,14 @@ def _rail_demand(ctx: BuildContext, node: str, horizon: int) -> float:
 def _ammonia_demand(ctx: BuildContext, node: str, horizon: int) -> float | None:
     """Industrial ammonia demand, which is not a load in the network."""
     clusters = ctx.config.model.clusters
-    name = f"industrial_energy_demand_base_s_{clusters}_{horizon}.csv"
-    if not (ctx.resources_dir / name).exists():
-        logger.info("%s absent: no ammonia row for %s", name, horizon)
+    # Legacy name, then current PyPSA-Eur (per node, no cluster wildcard).
+    names = [
+        f"industrial_energy_demand_base_s_{clusters}_{horizon}.csv",
+        f"industrial_energy_demand_{horizon}.csv",
+    ]
+    name = next((n for n in names if (ctx.resources_dir / n).exists()), None)
+    if name is None:
+        logger.info("none of %s: no ammonia row for %s", names, horizon)
         return None
     table = ctx.read_csv(name, base="resources", index_col=0)
     if table is None or "ammonia" not in table.columns:
