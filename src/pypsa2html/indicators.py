@@ -911,6 +911,16 @@ def _close_energy_graph(ctx, node: str, flows: pd.DataFrame) -> pd.DataFrame:
         flows, ("pac_fe", "agr", "")
     )
 
+    # -- 0b. methanolisation as a process node ------------------------------
+    # Inputs H2 and electricity, outputs methanol, heat and losses.  The link
+    # reports its outputs and its electricity input; the hydrogen input (its
+    # main port) is what the outputs need beyond the electricity.
+    process_out = sum(
+        (column(flows, ("mtn", target, "")) for target in ("met_fe", "vap_se", "per")),
+        _zeros(years),
+    )
+    flows[("hyd_se", "mtn", "")] = process_out - column(flows, ("elc_se", "mtn", ""))
+
     # -- 1. deliveries from the networks to final use ----------------------
     fec = fe_consumption()
     for carrier in SE_TO_FE_CARRIERS:
