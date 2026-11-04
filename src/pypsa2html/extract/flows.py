@@ -661,6 +661,37 @@ def _orient(flows: pd.DataFrame) -> pd.DataFrame:
     return flows
 
 
+def _merge_generators_into_links(flows: pd.DataFrame) -> pd.DataFrame:
+    """A generator that does what a same-carrier link's output port does joins that row.
+
+    PyPSA-Eur can model one technology both ways at once: in myopic runs nuclear
+    is a Generator on the AC bus for some plants and a Link from ``uranium`` for
+    others.  Ranked apart, the link rows take ``nuclear`` / ``nuclear_2`` wherever
+    a region has one (even at zero output) and push the generator to
+    ``nuclear_3``, which no code maps -- the study-wide Sankey lost all Belgian
+    nuclear (26.9 TWh, 2030) while the BE page, without a link, showed it.
+    Merged, the name no longer depends on which plants a region happens to hold.
+    """
+    links = flows[(flows["origin"] == "link") & (flows["target"] != LOSSES)]
+    if links.empty:
+        return flows
+    flows = flows.copy()
+    first = links.sort_values(["sign", "port"], kind="stable").drop_duplicates(
+        ["carrier", "target"]
+    )
+    key = first.set_index(["carrier", "target"])
+    generator = flows["origin"] == "generator"
+    for idx in flows.index[generator]:
+        match = (flows.at[idx, "carrier"], flows.at[idx, "target"])
+        if match not in key.index:
+            continue
+        row = key.loc[match]
+        flows.loc[idx, ["source", "origin", "port", "sign"]] = [
+            row["source"], "link", row["port"], row["sign"],
+        ]
+    return _group(flows)
+
+
 def _drop_structural(flows: pd.DataFrame) -> pd.DataFrame:
     """Rows that can never be an energy flow, dropped before ranking."""
     source, target = flows["source"], flows["target"]
@@ -733,7 +764,20 @@ def _flows_for_horizon(ctx: BuildContext, node: str, horizon: int) -> pd.Series:
     for column in ("carrier", "source"):
         everything.loc[generator, column] = everything.loc[generator, column].replace(fossil)
 
+    # Heat vents are generators that *take* heat (p ≤ 0).  Drawn as heat -> vented:
+    # left as carrier -> heat bus, both ends fold to "heat" below and the row is
+    # dropped as structural, so the heat node did not balance (NL 2050: 4.3 TWh).
+    vent = generator & everything["carrier"].str.endswith(" heat vent", na=False)
+    everything.loc[vent, "source"] = everything.loc[vent, "target"]
+    everything.loc[vent, "target"] = "vented"
+    everything.loc[vent, "value"] = everything.loc[vent, "value"].abs()
+    # A storage unit without inflow (PHS) nets to its round-trip losses, which are
+    # negative; they are drawn as a loss edge, so the magnitude is kept.
+    phs = (everything["origin"] == "storage_unit") & (everything["carrier"] == "PHS")
+    everything.loc[phs, "value"] = everything.loc[phs, "value"].abs()
+
     everything = _aggregate_carriers(everything)
+    everything = _merge_generators_into_links(everything)
     everything = _drop_structural(everything)
     everything["entry"] = _rank_entries(everything)
     flat = everything.set_index("entry")["value"].astype(float)

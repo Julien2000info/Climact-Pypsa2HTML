@@ -130,7 +130,8 @@ DOMESTIC_CARRIERS: tuple[str, ...] = (
 )
 
 #: Primary energies whose supply is by definition imported.
-IMPORTED_CARRIERS: tuple[str, ...] = ("cms", "ura")
+# "oth": bioliquids bought as such (PyPSA-Eur `unsustainable bioliquids`, no location).
+IMPORTED_CARRIERS: tuple[str, ...] = ("cms", "ura", "oth")
 
 #: Secondary carriers balanced against the rest of the system by trade.
 TRADED_SE_CARRIERS: tuple[str, ...] = ("elc", "hyd")
@@ -229,6 +230,7 @@ IMPORT_FLOWS: tuple[tuple[str, str, str], ...] = (
     ("imp", "met_fe", ""),
     ("ura_pe", "elc_se", "thm"),
     ("imp", "cms_pe", ""),
+    ("imp", "oth_pe", ""),
 )
 
 #: Flows reported as domestic production in the per-node trade summary.
@@ -919,7 +921,9 @@ def _close_energy_graph(ctx, node: str, flows: pd.DataFrame) -> pd.DataFrame:
     fischer = column(flows, ("hyd_se", "pet_fe", ""))
     biomass_liquid = column(flows, ("enc_pe", "pet_fe", ""))
     electro_biofuel = column(flows, ("enc_pe", "pet_fe", "bio"))
-    synthetic = fischer + biomass_liquid + electro_biofuel
+    # Bioliquids supplied as such (PyPSA-Eur ``unsustainable bioliquids``): not fossil.
+    bioliquids = column(flows, ("oth_pe", "pet_fe", ""))
+    synthetic = fischer + biomass_liquid + electro_biofuel + bioliquids
     flows[("pet_pe", "pet_fe", "")] = (demand - synthetic).where(
         demand > synthetic, fischer - biomass_liquid - demand
     )

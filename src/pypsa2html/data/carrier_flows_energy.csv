@@ -176,3 +176,12 @@ BioSNG CC_2,BioSNG CC losses,TWh,probiosnglosscc
 BEV charger,Smart charging,TWh,prebev
 BEV charger_2,BEV charging losses,TWh,prebevloss
 natural EV charging,Natural charging,TWh,prenatbev
+biomass-to-methanol,Production of methanol from biomass,TWh,promethbio
+biomass-to-methanol_2,Transformation losses (biomass to methanol),TWh,lossmethbio
+urban central heat vent,Heat vented (urban central),TWh,ventvapuc
+urban decentral heat vent,Heat vented (urban decentral),TWh,ventvapud
+rural heat vent,Heat vented (rural),TWh,ventvapr
+gas feedstock for industry,gas for non-energy,TWh,presgazcfneind
+oil refining_2,Transformation losses (oil refining),TWh,lossoilref
+unsustainable bioliquids,bioliquids to oil products,TWh,probioliq
+PHS,Pumped-hydro storage losses,TWh,lossphs

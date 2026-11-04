@@ -252,3 +252,26 @@ def test_branch_and_one_port_flows_concat_once():
     # No quadratic concat inside the component loop.
     assert branch_src.count("pd.concat") == 1
     assert one_src.count("pd.concat") == 1
+
+
+def test_generator_joins_same_carrier_link_output():
+    """Nuclear as Generator (some plants) and as Link (others) keeps one name."""
+    import pandas as pd
+    from pypsa2html.extract.flows import _merge_generators_into_links, _rank_entries
+
+    flows = pd.DataFrame(
+        {
+            "carrier": ["nuclear", "nuclear", "nuclear"],
+            "source": ["uranium", "uranium", "nuclear"],
+            "target": ["AC", "losses", "AC"],
+            "value": [0.0, 0.0, 29.5],
+            "origin": ["link", "link", "generator"],
+            "port": [1, 5, 0],
+            "sign": [0, 0, 0],
+        }
+    )
+    merged = _merge_generators_into_links(flows)
+    merged["entry"] = _rank_entries(merged)
+    out = merged.set_index("entry")["value"]
+    assert out["nuclear"] == 29.5
+    assert "nuclear_3" not in out.index
