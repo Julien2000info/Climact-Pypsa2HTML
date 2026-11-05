@@ -80,3 +80,4 @@ unsustainable bioliquids_2,unsustainable bioliquids,MtCO2,emmbioliq
 biomass-to-methanol,biomass-to-methanol uptake,MtCO2,emmbmmetatm
 biomass-to-methanol_2,biomass-to-methanol,MtCO2,emmbmmet
 land transport gas emissions,land transport gas emissions,MtCO2,emmgastra
+oil for industry emissions,oil for industry emissions,MtCO2,emmoilind

@@ -274,6 +274,7 @@ CARBON_FLOWS: tuple[CarbonFlow, ...] = (
     CarbonFlow("industry methanol", "methanol", ATMOSPHERE, ("industry methanol",), 2),
     # Gas vehicles as their own load (PyPSA-Eur-CANEU, PatEx soft-link).
     CarbonFlow("land transport gas emissions", "gas", ATMOSPHERE, ("land transport gas",), 2),
+    CarbonFlow("oil for industry emissions", "oil", ATMOSPHERE, ("oil for industry",), 2),
 )
 
 

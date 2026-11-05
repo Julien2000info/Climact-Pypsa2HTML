@@ -191,3 +191,5 @@ shipping electricity,shipping electricity demand,TWh,preselccfwati
 H2 for rail,hydrogen demand for rail network,TWh,preshydras
 land transport gas,land transport gas demand,TWh,presgazcftra
 land transport gas_2,gas to land transport gas demand,TWh,presgazcfdem
+oil for industry,oil for industry,TWh,prespetcfind
+oil for industry_2,oil to oil for industry demand,TWh,prespetcfinddem
