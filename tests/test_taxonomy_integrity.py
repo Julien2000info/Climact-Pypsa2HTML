@@ -118,7 +118,9 @@ def test_energy_sankey_unresolved_edges_do_not_increase(tax, produced_codes):
     # losses, bioliquids, PHS losses, and the main inputs of the process nodes
     # (`hydmtn`, `elchbn`, `encebf`, computed when the graph is closed) plus
     # `hbnh2` (Haber-Bosch hydrogen input, its own code).
-    assert len(referenced - produced_codes) <= 212
+    # 215: +3 for PyPSA-Eur-CANEU's own transport loads (aviation and shipping
+    # electricity, hydrogen rail).
+    assert len(referenced - produced_codes) <= 215
 
 
 def test_value_codes_reused_across_edges_are_known(tax):

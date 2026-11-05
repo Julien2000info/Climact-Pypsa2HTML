@@ -740,7 +740,9 @@ def _flows_for_horizon(ctx: BuildContext, node: str, horizon: int) -> pd.Series:
     ):
         parts.append(_one_port_flows(ctx, network, node, horizon, component, origin))
 
-    rail = _rail_demand(ctx, node, horizon)
+    # A network with its own rail load (PyPSA-Eur-CANEU) needs no estimate.
+    has_rail_load = network.loads["carrier"].eq("rail electricity").any()
+    rail = 0.0 if has_rail_load else _rail_demand(ctx, node, horizon)
     clever = _clever_industry(ctx, node, horizon)
     overrides = (
         {

@@ -272,6 +272,8 @@ CARBON_FLOWS: tuple[CarbonFlow, ...] = (
                ("biomass-to-methanol",), 2, sign=1.0, same_as_previous=True),
     CarbonFlow("oil plants", "oil", ATMOSPHERE, ("oil",), 2),
     CarbonFlow("industry methanol", "methanol", ATMOSPHERE, ("industry methanol",), 2),
+    # Gas vehicles as their own load (PyPSA-Eur-CANEU, PatEx soft-link).
+    CarbonFlow("land transport gas emissions", "gas", ATMOSPHERE, ("land transport gas",), 2),
 )
 
 

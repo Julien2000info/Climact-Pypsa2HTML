@@ -185,3 +185,9 @@ gas feedstock for industry,gas for non-energy,TWh,presgazcfneind
 oil refining_2,Transformation losses (oil refining),TWh,lossoilref
 unsustainable bioliquids,bioliquids to oil products,TWh,probioliq
 PHS,Pumped-hydro storage losses,TWh,lossphs
+rail electricity,electricity demand for rail network,TWh,preserail
+aviation electricity,aviation electricity demand,TWh,preselccfavi
+shipping electricity,shipping electricity demand,TWh,preselccfwati
+H2 for rail,hydrogen demand for rail network,TWh,preshydras
+land transport gas,land transport gas demand,TWh,presgazcftra
+land transport gas_2,gas to land transport gas demand,TWh,presgazcfdem

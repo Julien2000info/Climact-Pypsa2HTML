@@ -75,6 +75,10 @@ _DEMAND_CODES: dict[str, tuple[str, str]] = {
     "presvapcfind": ("heat", "low-temperature heat for industry"),
     "prespetcfneind": ("Non-energy", "naphtha for non-energy"),
     "preserail": ("electricity", "electricity demand for rail network"),
+    "preselccfavi": ("electricity", "aviation electricity demand"),
+    "preselccfwati": ("electricity", "shipping electricity demand"),
+    "preshydras": ("hydrogen", "hydrogen demand for rail network"),
+    "presgazcftra": ("methane", "land transport gas demand"),
     "presvapcfdhs": ("heat", "Residential and tertiary DH demand"),
     # The three residential/tertiary heat buses each emit their own code in
     # carrier_flows_energy.csv: rural -> demandheat, urban decentral ->
