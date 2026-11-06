@@ -83,3 +83,7 @@ land transport gas emissions,land transport gas emissions,MtCO2,emmgastra
 oil for industry emissions,oil for industry emissions,MtCO2,emmoilind
 gas for cooking emissions,gas for cooking emissions,MtCO2,emmgascook
 oil for cooking emissions,oil for cooking emissions,MtCO2,emmoilcook
+import biogas,import biogas uptake,MtCO2,emmimpbgl
+import bioliquids,import bioliquids uptake,MtCO2,emmimpbioliq
+import gas,import synthetic gas uptake,MtCO2,emmimpsyngas
+import oil,import synthetic oil uptake,MtCO2,emmimpsynoil

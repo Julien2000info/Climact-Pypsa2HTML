@@ -122,7 +122,9 @@ def test_energy_sankey_unresolved_edges_do_not_increase(tax, produced_codes):
     # electricity, hydrogen rail).
     # 220: +5 for PyPSA-Eur-CANEU's non-electric cooking loads (gas, oil, coal,
     # solid biomass, hydrogen).
-    assert len(referenced - produced_codes) <= 220
+    # 227: +7 for PyPSA-Eur-CANEU's import limits (imported biomethane, synthetic
+    # methane, bioliquids, synthetic oil; modelled domestic gas, oil, coal).
+    assert len(referenced - produced_codes) <= 227
 
 
 def test_value_codes_reused_across_edges_are_known(tax):

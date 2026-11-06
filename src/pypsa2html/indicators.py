@@ -115,6 +115,9 @@ GAS_GRID_RENEWABLE: tuple[tuple[str, str, str], ...] = (
     ("enc_pe", "gaz_se", ""),
     ("enc_pe", "gaz_se", "cc"),
     ("hyd_se", "gaz_se", ""),
+    # imported biomethane and synthetic methane (PyPSA-Eur-CANEU import limits)
+    ("imp", "gaz_se", "bio"),
+    ("imp", "gaz_se", "syn"),
 )
 
 #: Primary energies whose supply is by definition domestic.
@@ -999,14 +1002,20 @@ def _close_energy_graph(ctx, node: str, flows: pd.DataFrame) -> pd.DataFrame:
     domestic = list(DOMESTIC_CARRIERS) + (["enc"] if aggregate else [])
     for carrier in domestic:
         flows[("prod", f"{carrier}_pe", "")] = pe_supply.get(f"{carrier}_pe", _zeros(years))
+    # Domestic production the model has as its own generators (PyPSA-Eur-CANEU
+    # `gas/oil/coal production`, edge type ``mod``) is not imported.
+    def modelled(carrier):
+        return column(flows, ("prod", f"{carrier}_pe", "mod"))
+
     for carrier in IMPORTED_CARRIERS:
-        flows[("imp", f"{carrier}_pe", "")] = pe_supply.get(f"{carrier}_pe", _zeros(years))
+        used = pe_supply.get(f"{carrier}_pe", _zeros(years))
+        flows[("imp", f"{carrier}_pe", "")] = (used - modelled(carrier)).clip(lower=0)
 
     for carrier, table, what in (
         ("gaz", ctx.taxonomy.domestic_gas, "domestic gas production"),
         ("pet", ctx.taxonomy.domestic_oil, "domestic oil production"),
     ):
-        used = pe_supply.get(f"{carrier}_pe", _zeros(years))
+        used = (pe_supply.get(f"{carrier}_pe", _zeros(years)) - modelled(carrier)).clip(lower=0)
         local = _domestic_production(ctx, node, table, years, what)
         flows[("prod", f"{carrier}_pe", "")] = np.minimum(used, local)
         flows[("imp", f"{carrier}_pe", "")] = (used - local).clip(lower=0)

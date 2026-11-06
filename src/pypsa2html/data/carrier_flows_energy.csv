@@ -203,3 +203,10 @@ solid biomass for cooking,solid biomass for cooking demand,TWh,presenccfcook
 solid biomass for cooking_2,solid biomass to solid biomass for cooking demand,TWh,presenccfcookdem
 H2 for cooking,hydrogen for cooking demand,TWh,preshydcfcook
 urban central heat losses,Heat network distribution losses,TWh,fza
+import biogas,Imported biomethane,TWh,procimpbgl
+import gas,Imported synthetic methane,TWh,procimpsyngas
+import bioliquids,Imported bioliquids to oil products,TWh,probioliqimp
+import oil,Imported synthetic oil,TWh,procimpsynoil
+gas production,Domestic natural gas production (modelled),TWh,prodomgazmod
+oil production,Domestic petroleum production (modelled),TWh,prodompetmod
+coal production,Domestic production of solid fossil fuels (modelled),TWh,prodomcmsmod

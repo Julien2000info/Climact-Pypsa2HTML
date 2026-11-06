@@ -250,7 +250,8 @@ CARBON_FLOWS: tuple[CarbonFlow, ...] = (
     CarbonFlow("Waste CHP CC", "Waste CHP", STORED, ("waste CHP CC",), 4),
     CarbonFlow("Waste CHP CC1", "Waste CHP", ATMOSPHERE, ("waste CHP CC",), 3),
     CarbonFlow("HVC to air", "oil", ATMOSPHERE, ("HVC to air",), 1),
-    CarbonFlow("fossil gas", "fossil gas", "gas", ("gas",), component="generators", sign=1.0,
+    CarbonFlow("fossil gas", "fossil gas", "gas", ("gas", "gas production"),
+               component="generators", sign=1.0,
                intensity=("gas", "CO2 intensity")),
     CarbonFlow("fossil oil", "fossil oil", "oil", ("oil refining",), 1,
                intensity=("oil", "CO2 intensity")),
@@ -279,6 +280,12 @@ CARBON_FLOWS: tuple[CarbonFlow, ...] = (
     # prefix row, like coal for industry.
     CarbonFlow("gas for cooking emissions", "gas", ATMOSPHERE, ("gas for cooking",), 2),
     CarbonFlow("oil for cooking emissions", "oil", ATMOSPHERE, ("oil for cooking",), 2),
+    # Carbon-neutral imports (PyPSA-Eur `sector.imports`, PyPSA-Eur-CANEU
+    # `import_limits.bio_imports`): bus0 is the atmosphere, p0 the CO2 taken up.
+    CarbonFlow("import biogas", ATMOSPHERE, "gas", ("import biogas",), 0, sign=1.0),
+    CarbonFlow("import bioliquids", ATMOSPHERE, "oil", ("import bioliquids",), 0, sign=1.0),
+    CarbonFlow("import gas", ATMOSPHERE, "gas", ("import gas",), 0, sign=1.0),
+    CarbonFlow("import oil", ATMOSPHERE, "oil", ("import oil",), 0, sign=1.0),
 )
 
 
