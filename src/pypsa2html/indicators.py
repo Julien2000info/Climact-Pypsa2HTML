@@ -954,10 +954,15 @@ def _close_energy_graph(ctx, node: str, flows: pd.DataFrame) -> pd.DataFrame:
     electro_biofuel = column(flows, ("ebf", "pet_fe", "bio"))
     # Bioliquids supplied as such (PyPSA-Eur ``unsustainable bioliquids``): not fossil.
     bioliquids = column(flows, ("oth_pe", "pet_fe", ""))
-    synthetic = fischer + biomass_liquid + electro_biofuel + bioliquids
-    flows[("pet_pe", "pet_fe", "")] = (demand - synthetic).where(
-        demand > synthetic, fischer - biomass_liquid - demand
-    )
+    # Imported bioliquids and synthetic oil (PyPSA-Eur-CANEU import limits).
+    imported = column(flows, ("oth_pe", "pet_fe", "imp")) + column(flows, ("imp", "pet_fe", "syn"))
+    synthetic = fischer + biomass_liquid + electro_biofuel + bioliquids + imported
+    # Oil is one EU-level pool: a node making more liquid fuel than it uses
+    # (e.g. electrobiofuels) exports the surplus instead of a negative fossil
+    # flow. The original wrote ``fischer - biomass_liquid - demand`` there.
+    flows[("pet_pe", "pet_fe", "")] = (demand - synthetic).clip(lower=0)
+    if not aggregate:
+        flows[("pet_fe", "exp", "")] = (synthetic - demand).clip(lower=0)
 
     base_year = ctx.config.model.base_year
     if base_year is not None and base_year in years:
@@ -996,6 +1001,17 @@ def _close_energy_graph(ctx, node: str, flows: pd.DataFrame) -> pd.DataFrame:
         )
     else:
         logger.warning("no nuclear efficiency in the cost table; nuclear thermal losses omitted")
+
+    # -- 5b. thermal storage standing losses -------------------------------
+    # The stores lose heat over time (PyPSA ``standing_loss``), which no link
+    # reports; with cyclic stores, what goes in minus what comes out is that loss.
+    tes_in = sum_by(flows, where="Target", nodes=["tes_se"], by="Target").get(
+        "tes_se", _zeros(years)
+    )
+    tes_out = sum_by(flows, where="Source", nodes=["tes_se"], by="Source").get(
+        "tes_se", _zeros(years)
+    )
+    flows[("tes_se", "per", "sto")] = (tes_in - tes_out).clip(lower=0)
 
     # -- 6. domestic production versus imports -----------------------------
     pe_supply = sum_by(flows, where="Source", nodes=pe, by="Source")

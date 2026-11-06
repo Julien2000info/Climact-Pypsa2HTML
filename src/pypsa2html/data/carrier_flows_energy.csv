@@ -210,3 +210,6 @@ import oil,Imported synthetic oil,TWh,procimpsynoil
 gas production,Domestic natural gas production (modelled),TWh,prodomgazmod
 oil production,Domestic petroleum production (modelled),TWh,prodompetmod
 coal production,Domestic production of solid fossil fuels (modelled),TWh,prodomcmsmod
+import H2,Imported hydrogen (modelled),TWh,procimphydmod
+import NH3,Imported ammonia (modelled),TWh,procimpammmod
+import methanol,Imported methanol (modelled),TWh,procimpmetmod
