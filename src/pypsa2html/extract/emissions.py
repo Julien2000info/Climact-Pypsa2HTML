@@ -275,6 +275,10 @@ CARBON_FLOWS: tuple[CarbonFlow, ...] = (
     # Gas vehicles as their own load (PyPSA-Eur-CANEU, PatEx soft-link).
     CarbonFlow("land transport gas emissions", "gas", ATMOSPHERE, ("land transport gas",), 2),
     CarbonFlow("oil for industry emissions", "oil", ATMOSPHERE, ("oil for industry",), 2),
+    # Non-electric cooking (PyPSA-Eur-CANEU); coal for cooking is in the "coal"
+    # prefix row, like coal for industry.
+    CarbonFlow("gas for cooking emissions", "gas", ATMOSPHERE, ("gas for cooking",), 2),
+    CarbonFlow("oil for cooking emissions", "oil", ATMOSPHERE, ("oil for cooking",), 2),
 )
 
 

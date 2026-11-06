@@ -99,6 +99,12 @@ _DEMAND_CODES: dict[str, tuple[str, str]] = {
     "presenccfindd": ("solid biomass", "solid biomass for Industry"),
     "preammind": ("hydrogen", "NH3"),
     "prespetcfind": ("oil", "Oil for industry"),
+    # Non-electric cooking (PyPSA-Eur-CANEU, PatEx soft-link).
+    "presgazcfcook": ("methane", "gas for cooking demand"),
+    "prespetcfcook": ("oil", "oil for cooking demand"),
+    "prescmscfcook": ("coal", "coal for cooking demand"),
+    "presenccfcook": ("solid biomass", "solid biomass for cooking demand"),
+    "preshydcfcook": ("hydrogen", "hydrogen for cooking demand"),
 }
 
 

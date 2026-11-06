@@ -81,3 +81,5 @@ biomass-to-methanol,biomass-to-methanol uptake,MtCO2,emmbmmetatm
 biomass-to-methanol_2,biomass-to-methanol,MtCO2,emmbmmet
 land transport gas emissions,land transport gas emissions,MtCO2,emmgastra
 oil for industry emissions,oil for industry emissions,MtCO2,emmoilind
+gas for cooking emissions,gas for cooking emissions,MtCO2,emmgascook
+oil for cooking emissions,oil for cooking emissions,MtCO2,emmoilcook

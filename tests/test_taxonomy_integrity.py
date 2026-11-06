@@ -120,7 +120,9 @@ def test_energy_sankey_unresolved_edges_do_not_increase(tax, produced_codes):
     # `hbnh2` (Haber-Bosch hydrogen input, its own code).
     # 215: +3 for PyPSA-Eur-CANEU's own transport loads (aviation and shipping
     # electricity, hydrogen rail).
-    assert len(referenced - produced_codes) <= 215
+    # 220: +5 for PyPSA-Eur-CANEU's non-electric cooking loads (gas, oil, coal,
+    # solid biomass, hydrogen).
+    assert len(referenced - produced_codes) <= 220
 
 
 def test_value_codes_reused_across_edges_are_known(tax):

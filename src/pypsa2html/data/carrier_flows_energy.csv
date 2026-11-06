@@ -193,3 +193,13 @@ land transport gas,land transport gas demand,TWh,presgazcftra
 land transport gas_2,gas to land transport gas demand,TWh,presgazcfdem
 oil for industry,oil for industry,TWh,prespetcfind
 oil for industry_2,oil to oil for industry demand,TWh,prespetcfinddem
+gas for cooking,gas for cooking demand,TWh,presgazcfcook
+gas for cooking_2,gas to gas for cooking demand,TWh,presgazcfcookdem
+oil for cooking,oil for cooking demand,TWh,prespetcfcook
+oil for cooking_2,oil to oil for cooking demand,TWh,prespetcfcookdem
+coal for cooking,coal for cooking demand,TWh,prescmscfcook
+coal for cooking_2,coal to coal for cooking demand,TWh,prescmscfcookdem
+solid biomass for cooking,solid biomass for cooking demand,TWh,presenccfcook
+solid biomass for cooking_2,solid biomass to solid biomass for cooking demand,TWh,presenccfcookdem
+H2 for cooking,hydrogen for cooking demand,TWh,preshydcfcook
+urban central heat losses,Heat network distribution losses,TWh,fza
