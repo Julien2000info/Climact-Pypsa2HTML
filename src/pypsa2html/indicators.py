@@ -1035,6 +1035,11 @@ def _close_energy_graph(ctx, node: str, flows: pd.DataFrame) -> pd.DataFrame:
         local = _domestic_production(ctx, node, table, years, what)
         flows[("prod", f"{carrier}_pe", "")] = np.minimum(used, local)
         flows[("imp", f"{carrier}_pe", "")] = (used - local).clip(lower=0)
+        if not aggregate:
+            # A node producing more than it uses (Norwegian gas fields) sends the
+            # surplus out by pipeline: an export, not a hole in the node.
+            surplus = (modelled(carrier) - pe_supply.get(f"{carrier}_pe", _zeros(years)))
+            flows[(f"{carrier}_pe", "exp", "")] = surplus.clip(lower=0)
 
     # -- 7. biomass: exogenous potential versus modelled consumption -------
     if not aggregate:

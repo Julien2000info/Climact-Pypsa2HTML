@@ -127,7 +127,9 @@ def test_energy_sankey_unresolved_edges_do_not_increase(tax, produced_codes):
     # 231: +4: liquid fuel exports of a node (`proexppet`, computed) and modelled
     # imports of hydrogen, ammonia, methanol.
     # 232: +1 thermal storage standing losses (`losstes`, computed).
-    assert len(referenced - produced_codes) <= 232
+    # 233: +1 natural gas exports of a producing node (`proexpgaspe`, computed:
+    # Norwegian gas fields in the PyPSA-Eur-CANEU NW Europe run).
+    assert len(referenced - produced_codes) <= 233
 
 
 def test_value_codes_reused_across_edges_are_known(tax):

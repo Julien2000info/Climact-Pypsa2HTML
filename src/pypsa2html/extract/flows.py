@@ -195,6 +195,20 @@ def _load_totals(ctx: BuildContext, horizon: int) -> pd.Series:
     return _cache_get(ctx, ("load_totals", horizon), factory)
 
 
+def _typical_port_carrier(network, port: int) -> pd.Series:
+    """Link carrier → the bus carrier its ``bus{port}`` has wherever it is connected."""
+    column = f"bus{port}"
+    if column not in network.links:
+        return pd.Series(dtype=object)
+    links = network.links[network.links[column].astype(str) != ""]
+    carriers = links[column].map(network.buses.carrier).dropna()
+    if carriers.empty:
+        return pd.Series(dtype=object)
+    return carriers.groupby(links.loc[carriers.index, "carrier"]).agg(
+        lambda s: s.mode().iloc[0]
+    )
+
+
 def _link_flows(
     network,
     index: pd.Index,
@@ -227,6 +241,26 @@ def _link_flows(
         if connected is None:
             continue
         keep = connected.notna() & (links[f"bus{port}"].astype(str) != "")
+        # A port left empty here but connected for the same carrier elsewhere (e.g.
+        # methanolisation waste heat where the node has no district heating) gets a
+        # zero row on the usual bus carrier: the entry ranking (``_rank_entries``) is
+        # by port, and a missing row shifts the later ports onto the wrong codes
+        # (Shetland 2026-11-09: the electricity input was booked as waste heat).
+        typical = _typical_port_carrier(network, port)
+        placeholder = ~keep & links["carrier"].map(typical).notna()
+        if placeholder.any():
+            rows.append(
+                pd.DataFrame(
+                    {
+                        "carrier": links["carrier"][placeholder],
+                        "source": bus_carrier[0][placeholder],
+                        "target": links["carrier"][placeholder].map(typical),
+                        "value": 0.0,
+                        "origin": "link",
+                        "port": port,
+                    }
+                )
+            )
         if not keep.any():
             continue
         rows.append(
@@ -551,7 +585,11 @@ def _extra_rows(
 ) -> pd.DataFrame:
     """Rows the network does not contain: rail, ammonia, CLEVER overlays."""
     rows = []
-    ammonia = _ammonia_demand(ctx, node, horizon)
+    # Only for networks without an NH3 load (older PyPSA-Eur): where ammonia is a
+    # carrier, its industrial demand is already a load and would be counted twice.
+    network = ctx.networks[int(horizon)] if hasattr(ctx, "networks") else None
+    has_nh3_load = network is not None and (network.loads.carrier == "NH3").any()
+    ammonia = None if has_nh3_load else _ammonia_demand(ctx, node, horizon)
     if ammonia is not None:
         rows.append(("NH3", "H2", "ammonia for industry", ammonia))
 
