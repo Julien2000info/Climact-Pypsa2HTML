@@ -585,11 +585,13 @@ def _extra_rows(
 ) -> pd.DataFrame:
     """Rows the network does not contain: rail, ammonia, CLEVER overlays."""
     rows = []
-    # Only for networks without an NH3 load (older PyPSA-Eur): where ammonia is a
-    # carrier, its industrial demand is already a load and would be counted twice.
+    # Where ammonia is a network carrier with an NH3 load, the industrial demand is
+    # that load (entry ``NH3_2``, amm_fe -> ind) and the ammonia comes from
+    # Haber-Bosch: the hydrogen-to-ammonia shortcut row stays, at zero, so that the
+    # load keeps its ``NH3_2`` entry (it took ``NH3`` and was drawn hyd_se -> amm_fe).
     network = ctx.networks[int(horizon)] if hasattr(ctx, "networks") else None
     has_nh3_load = network is not None and (network.loads.carrier == "NH3").any()
-    ammonia = None if has_nh3_load else _ammonia_demand(ctx, node, horizon)
+    ammonia = 0.0 if has_nh3_load else _ammonia_demand(ctx, node, horizon)
     if ammonia is not None:
         rows.append(("NH3", "H2", "ammonia for industry", ammonia))
 
