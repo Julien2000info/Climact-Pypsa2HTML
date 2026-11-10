@@ -87,3 +87,6 @@ import biogas,import biogas uptake,MtCO2,emmimpbgl
 import bioliquids,import bioliquids uptake,MtCO2,emmimpbioliq
 import gas,import synthetic gas uptake,MtCO2,emmimpsyngas
 import oil,import synthetic oil uptake,MtCO2,emmimpsynoil
+fossil oil refinery,fossil oil burnt in refineries,MtCO2,emmfossoilref
+naphtha carbon,naphtha feedstock carbon,MtCO2,emmnaphtha
+naphtha carbon in products,naphtha carbon kept in products,MtCO2,emmnaphprod

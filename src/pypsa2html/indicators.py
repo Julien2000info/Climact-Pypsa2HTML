@@ -142,6 +142,14 @@ TRADED_SE_CARRIERS: tuple[str, ...] = ("elc", "hyd")
 #: Taxonomy types that are transformation nodes.  After graph closure, inflow
 #: must equal outflow.  Sources (``prod``, ``imp``), sinks (demand sectors,
 #: ``per``, ``exp``) and GHG nodes are exempt — they are meant to be open.
+#: Carbon-graph nodes that carry carbon through (what enters leaves): checked like
+#: the energy nodes (2026-11-10; the oil node was 109 Mt short on NWE 2040 and no
+#: check looked at the carbon graph). Sources (fossil fuels, atmosphere uptake,
+#: industrial processes) and sinks (net emissions, sequestration, products) are not.
+CARBON_BALANCE_NODES: tuple[str, ...] = (
+    "oil_ghg", "gas_ghg", "met_ghg", "hvc_ghg", "pro_ghg", "wst_ghg",
+)
+
 BALANCE_NODE_TYPES: tuple[str, ...] = (
     "PRIMARY_ENERGIES",
     "SECONDARY_ENERGIES",
@@ -464,6 +472,7 @@ def graph_imbalances(
     *,
     atol: float = 0.05,
     rtol: float = 0.02,
+    codes: Sequence[str] | None = None,
 ) -> pd.DataFrame:
     """Transformation nodes whose annual inflow does not equal outflow.
 
@@ -479,8 +488,10 @@ def graph_imbalances(
     columns = ["node", "year", "incoming", "outgoing", "gap"]
     if flows is None or flows.empty:
         return pd.DataFrame(columns=columns)
-    types = taxonomy.nodes["Type"]
-    codes = [c for c in types.index if types.get(c) in BALANCE_NODE_TYPES]
+    if codes is None:
+        types = taxonomy.nodes["Type"]
+        codes = [c for c in types.index if types.get(c) in BALANCE_NODE_TYPES]
+    codes = list(codes)
     incoming = sum_by(flows, where="Target", nodes=codes, by="Target")
     outgoing = sum_by(flows, where="Source", nodes=codes, by="Source")
     rows: list[dict] = []
@@ -542,11 +553,16 @@ def collected_imbalances(ctx) -> pd.DataFrame:
     )
 
 
-def _warn_imbalances(ctx, node: str, flows: pd.DataFrame) -> None:
-    """Log unbalanced Sankey nodes; never raises (the report still renders)."""
-    imb = graph_imbalances(flows, ctx.taxonomy)
+def _warn_imbalances(ctx, node: str, flows: pd.DataFrame, *, carbon: bool = False) -> None:
+    """Log unbalanced Sankey nodes; never raises (the report still renders).
+
+    ``carbon``: the carbon graph (nodes :data:`CARBON_BALANCE_NODES`, MtCO2),
+    filed under ``"<node> (carbon)"``."""
+    imb = graph_imbalances(flows, ctx.taxonomy,
+                           codes=CARBON_BALANCE_NODES if carbon else None)
     if hasattr(ctx, "_files"):
-        ctx._files.setdefault(IMBALANCE_CACHE_KEY, {})[str(node)] = imb
+        key = f"{node} (carbon)" if carbon else str(node)
+        ctx._files.setdefault(IMBALANCE_CACHE_KEY, {})[key] = imb
     if imb.empty:
         return
     parts = [
@@ -555,10 +571,12 @@ def _warn_imbalances(ctx, node: str, flows: pd.DataFrame) -> None:
     ]
     extra = " ..." if len(parts) > 12 else ""
     logger.warning(
-        "energy Sankey for %s: %d unbalanced transformation node-year(s) "
-        "(outgoing − incoming, TWh): %s%s",
+        "%s Sankey for %s: %d unbalanced transformation node-year(s) "
+        "(outgoing − incoming, %s): %s%s",
+        "carbon" if carbon else "energy",
         node,
         len(parts),
+        "MtCO2" if carbon else "TWh",
         "; ".join(parts[:12]),
         extra,
     )
@@ -1157,23 +1175,29 @@ def _close_carbon_graph(
         flows_co2[("hth_ghg", "met_ghg", "")] = (demand - produced) * methanol_co2
         flows_co2[("met_ghg", "eth_ghg", "")] = (produced - demand) * methanol_co2
 
-    # -- the fossil-oil node collects every oil combustion emission --------
+    # -- a country draws its oil from the EU-wide oil bus: its fossil inflow is
+    # every carbon flow leaving its oil node (combustion, naphtha feedstock,
+    # exports...) minus the non-fossil inflows (synthetic, bio, imported
+    # neutral). The study-wide node reads it from the refineries instead.
     if not aggregate:
-        combustion = sum(
-            (
-                column(flows_co2, ("oil_ghg", "atm", kind))
-                for kind in ("rb", "rc", "oi", "hvc", "agr", "avi", "so", "tra")
-            ),
-            _zeros(years),
-        )
+        out_oil = sum_by(flows_co2, where="Source", nodes=["oil_ghg"], by="Source")
+        in_oil = sum_by(flows_co2, where="Target", nodes=["oil_ghg"], by="Target")
+        fossil = [c for c in flows_co2.columns if c[0] == "fol_ghg" and c[1] == "oil_ghg"]
+        other_in = in_oil.get("oil_ghg", _zeros(years)) - sum(
+            (flows_co2[c] for c in fossil), _zeros(years))
+        for c in fossil:
+            flows_co2[c] = _zeros(years)
         flows_co2[("fol_ghg", "oil_ghg", "")] = (
-            combustion
-            + column(flows_co2, ("oil_ghg", "hvc_ghg", "oil"))
-            - column(flows_co2, ("stm", "oil_ghg", ""))
-            - column(flows_co2, ("bm_ghg", "oil_ghg", "bio"))
-            # pypsa-wal: biomass-to-liquid; absent from the négaWatt taxonomy.
-            - column(flows_co2, ("bm_ghg", "oil_ghg", "bm"))
+            out_oil.get("oil_ghg", _zeros(years)) - other_in
         )
+
+    # -- process emissions: the naphtha share enters from the naphtha node, the
+    # rest (calcination, ...) is drawn from "industrial processes" ------------
+    out_pro = sum_by(flows_co2, where="Source", nodes=["pro_ghg"], by="Source")
+    in_pro = sum_by(flows_co2, where="Target", nodes=["pro_ghg"], by="Target")
+    flows_co2[("indnes_ghg", "pro_ghg", "")] = (
+        out_pro.get("pro_ghg", _zeros(years)) - in_pro.get("pro_ghg", _zeros(years))
+    )
 
     # -- for the aggregate node, fossil gas is the residual ----------------
     if aggregate:
@@ -1509,6 +1533,7 @@ def build(ctx, node: str, *, energy: pd.DataFrame, carbon: pd.DataFrame) -> Indi
     flows = _close_energy_graph(ctx, node, flows)
     _warn_imbalances(ctx, node, flows)
     flows_co2 = _close_carbon_graph(ctx, node, flows_co2, flows)
+    _warn_imbalances(ctx, node, flows_co2, carbon=True)
 
     return Indicators(ctx=ctx, node=node, flows=flows, flows_co2=flows_co2, flows_ghg=flows_ghg)
 

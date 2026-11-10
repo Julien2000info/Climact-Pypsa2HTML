@@ -60,17 +60,23 @@ def test_resolvable_builder_returns_chart_result(chart_ctx, page_id, section):
     assert result is None or isinstance(result, (go.Figure, Html))
 
 
-def test_bars_ordered_by_earliest_horizon():
-    """Largest first in the earliest horizon; the same order for every horizon."""
+def test_stacked_bars_sorted_per_bar_legend_as_first_bar():
+    """Each bar largest first; legend in the first bar's visual order (user,
+    2026-11-10). Grouped bars share the x axis: earliest horizon's order."""
     import pandas as pd
 
     from pypsa2html.charts.base import grouped_bar, order_by_first_horizon, stacked_bar
 
     df = pd.DataFrame(
-        {"2030": [1.0, 5.0, 0.0, -3.0], "2040": [9.0, 1.0, 2.0, 0.0]},
+        {"2030": [1.0, 5.0, 0.0, 3.0], "2040": [9.0, 1.0, 2.0, 0.0]},
         index=["a", "b", "c", "d"],
     )
-    assert list(order_by_first_horizon(df).index) == ["b", "d", "a", "c"]
     fig = stacked_bar(df, None, "TWh", signed=False)
-    assert [t.name for t in fig.data] == ["b", "d", "a", "c"]
+    per_bar = {y: [t.name for t in fig.data if t.x[0] == y] for y in ("2030", "2040")}
+    assert per_bar == {"2030": ["b", "d", "a"], "2040": ["a", "c", "b"]}
+    legend = sorted((t for t in fig.data if t.showlegend is not False),
+                    key=lambda t: t.legendrank)
+    # first bar top-down: a (top), d, b (bottom); then c, absent from it
+    assert [t.name for t in legend] == ["a", "d", "b", "c"]
+    assert list(order_by_first_horizon(df).index) == ["b", "d", "a", "c"]
     assert list(grouped_bar(df, "%").data[0].x) == ["b", "d", "a", "c"]

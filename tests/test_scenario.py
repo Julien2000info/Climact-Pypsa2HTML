@@ -48,8 +48,11 @@ def test_the_difference_view_is_technology_by_technology():
     fig = sc.costs(_ctx({"A": a, "B": b}), "AA", SECTION)
     traces = {t.name: t for t in fig.data if t.name in ("solar", "gas")}
     # The difference view's solar trace: +5 in 2030, +10 in 2050.
-    solar = [t for t in fig.data if t.name == "solar"]
-    assert any(list(t.y) == [5.0, 10.0] for t in solar)
+    # one trace per bar (stacked bars sorted per bar, 2026-11-10): read per x
+    solar = {(str(x), float(y)) for t in fig.data if t.name == "solar"
+             for x, y in zip(t.x, t.y)}
+    assert any(y == 5.0 and "2030" in x for x, y in solar)
+    assert any(y == 10.0 and "2050" in x for x, y in solar)
     assert traces
 
 

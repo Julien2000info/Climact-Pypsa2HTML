@@ -503,14 +503,21 @@ def order_by_first_horizon(data: pd.DataFrame) -> pd.DataFrame:
     """Rows of a category x horizon table, largest first by absolute value in the
     earliest horizon; ties (e.g. zero in the first horizon) by the next horizons.
 
-    One order for every horizon, so bars of different horizons set side by side
-    keep their categories in the same place (user, 2026-11-10).
+    For charts whose categories share one axis across horizons (grouped bars,
+    capacity panels), where one order must serve every horizon.
     """
     if data is None or data.empty or not len(data.columns):
         return data
     key = data.astype(float).abs().fillna(0.0)
     order = sorted(range(len(key)), key=lambda i: tuple(-v for v in key.iloc[i].values))
     return data.iloc[order]
+
+
+def _largest_first(values: pd.Series) -> list:
+    """Non-zero categories of one bar, largest absolute value first (stable)."""
+    v = values.astype(float).fillna(0.0)
+    v = v[v != 0]
+    return sorted(v.index, key=lambda k: -abs(v[k]))
 
 
 def stacked_bar(
@@ -530,9 +537,13 @@ def stacked_bar(
     ``create_clustered_costs``, ``create_investment_costs``,
     ``create_operational_costs``).
 
-    When ``signed`` is true, positive and negative values are split so
-    ``barmode='relative'`` stacks credits below the axis.  ``scale`` multiplies
-    every value (e.g. ``1e-3`` to show MW as GW).
+    Each bar is sorted on its own, largest contribution first (next to the axis);
+    the legend lists the categories in the visual order of the first bar, then
+    those absent from it (user, 2026-11-10). One trace per category and bar, so
+    that the order can differ between bars; one legend entry per category.
+
+    With ``signed``, ``barmode='relative'`` stacks credits below the axis.
+    ``scale`` multiplies every value (e.g. ``1e-3`` to show MW as GW).
     """
     if df is None or df.empty or not len(df.columns):
         return None
@@ -541,49 +552,36 @@ def stacked_bar(
     data = data.loc[~(data == 0).all(axis=1)]
     if data.empty:
         return None
-    # largest first (bottom of the stack, top of the legend), earliest horizon's order
-    data = order_by_first_horizon(data)
     years = [str(c) for c in data.columns]
-    transposed = data.T
-    transposed.index = years
+    data.columns = years
     palette = dict(colors or {})
+
+    # legend: first bar top-down (positives from the top of the stack, then
+    # negatives from the axis down), then categories that appear later
+    first = data[years[0]].fillna(0.0)
+    order0 = _largest_first(first)
+    visual = [t for t in reversed(order0) if first[t] > 0] + [t for t in order0 if first[t] < 0]
+    later = [t for y in years[1:] for t in _largest_first(data[y]) if t not in visual]
+    ranks = {t: 10 * (k + 1) for k, t in enumerate(dict.fromkeys(visual + later))}
+
     fig = go.Figure()
-    for tech in transposed.columns:
-        series = transposed[tech]
-        color = resolve_tech_color(str(tech), palette)
-        if signed:
+    shown: set = set()
+    for year in years:
+        for tech in _largest_first(data[year]):
+            value = float(data.at[tech, year])
             fig.add_trace(
                 go.Bar(
-                    x=years,
-                    y=series.where(series > 0, 0.0),
-                    name=tech,
-                    marker_color=color,
-                    legendgroup=tech,
+                    x=[year],
+                    y=[value],
+                    name=str(tech),
+                    marker_color=resolve_tech_color(str(tech), palette),
+                    legendgroup=str(tech),
+                    legendrank=ranks[tech],
+                    showlegend=tech not in shown,
                     hovertemplate="%{y:.3g}",
                 )
             )
-            if (series < 0).any():
-                fig.add_trace(
-                    go.Bar(
-                        x=years,
-                        y=series.where(series < 0, 0.0),
-                        name=tech,
-                        marker_color=color,
-                        legendgroup=tech,
-                        showlegend=False,
-                        hovertemplate="%{y:.3g}",
-                    )
-                )
-        else:
-            fig.add_trace(
-                go.Bar(
-                    x=years,
-                    y=series,
-                    name=tech,
-                    marker_color=color,
-                    hovertemplate="%{y:.3g}",
-                )
-            )
+            shown.add(tech)
     fig.update_layout(
         title=title or None,
         barmode="relative" if signed else "stack",
@@ -594,8 +592,7 @@ def stacked_bar(
         legend_title_text="",
         margin={"l": 60, "r": 30, "t": 60 if title else 30, "b": 50},
         xaxis={"tickmode": "array", "tickvals": years, "title": ""},
-        # legend top-down = stack top-down (largest at the bottom of both)
-        legend={"traceorder": "reversed"},
+        legend={"traceorder": "normal"},
     )
     return fig
 
