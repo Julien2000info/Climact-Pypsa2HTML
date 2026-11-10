@@ -380,6 +380,10 @@ class OutputConfig:
     #: ``graph_imbalances.csv`` and logs a consolidated summary, and a caller
     #: that wants a gate turns this on.
     fail_on_graph_imbalance: bool = False
+    #: Stacked bars: a category below this share of its bar's absolute total in
+    #: every horizon is merged into one "Other" item (totals unchanged); a category
+    #: above it in any horizon keeps its colour in all horizons. 0 = off.
+    bar_min_share: float = 0.02
 
 
 @dataclass

@@ -44,48 +44,81 @@ def _balances(ctx) -> dict[int, SupplyBalance] | None:
 
 
 def self_sufficiency_regions(ctx, node: str, section) -> go.Figure | None:
-    """Self-sufficiency [%] of each supply region over the horizons."""
+    """Electricity (solid) and molecules (dashed) self-sufficiency [%] per supply
+    region over the horizons."""
     balances = _balances(ctx)
     if not balances:
         return None
-    frame = pd.DataFrame(
-        {y: b.self_sufficiency()["self-sufficiency [%]"] for y, b in balances.items()}
-    ).T
+    tables = {y: b.self_sufficiency() for y, b in balances.items()}
+    years = list(tables)
+    regions = list(tables[years[0]].index)
     fig = go.Figure()
-    for i, region in enumerate(frame.columns):
-        fig.add_scatter(
-            x=list(frame.index), y=frame[region].round(1), mode="lines+markers",
-            name=region, line={"color": REGION_COLOURS[i % len(REGION_COLOURS)]},
-        )
-    fig.add_hline(y=100, line_dash="dash", line_color="#888888",
+    for i, region in enumerate(regions):
+        colour = REGION_COLOURS[i % len(REGION_COLOURS)]
+        for kind, dash in (("electricity", "solid"), ("molecules", "dash")):
+            fig.add_scatter(
+                x=years,
+                y=[round(float(tables[y].at[region, f"{kind} self-sufficiency [%]"]), 1)
+                   for y in years],
+                mode="lines+markers", name=f"{region} {kind}",
+                line={"color": colour, "dash": dash},
+            )
+    fig.add_hline(y=100, line_dash="dot", line_color="#888888",
                   annotation_text="self-sufficient", annotation_position="top left")
-    _layout(fig, title="", unit=section.unit or "%", years=list(frame.index))
+    _layout(fig, title="", unit=section.unit or "%", years=years)
     return fig
+
+
+_MEASURES = (
+    ("domestic", "Domestic supply"),
+    ("imports", "Imports (from outside the model and from modelled regions)"),
+    ("exports", "Exports to modelled regions"),
+    ("self-sufficiency [%]", "Self-sufficiency"),
+)
+_KINDS = (
+    ("electricity", "Electricity", "net generation in the region"),
+    ("molecules", "Molecules (fuels)",
+     "primary fuels produced in the region + electrolytic H2"),
+    ("primary", "Primary energy (all vectors)",
+     "wind, solar, hydro, biomass, domestic fossil fuels, nuclear heat"),
+)
 
 
 def _summary_table(balances: dict[int, SupplyBalance]) -> str:
     years = list(balances)
     tables = {y: b.self_sufficiency() for y, b in balances.items()}
     rows = []
-    measures = [
-        ("domestic production", "Domestic primary production", "TWh/a"),
-        ("imports", "Imports (all vectors, incl. from modelled regions)", "TWh/a"),
-        ("exports", "Exports to modelled regions", "TWh/a"),
-        ("self-sufficiency [%]", "Self-sufficiency", "%"),
-        ("electricity net import", "Electricity net import", "TWh/a"),
-    ]
     for region in tables[years[0]].index:
         rows.append(f'<tr class="p2h-group"><td colspan="{len(years) + 2}">'
                     f"{html.escape(region)}</td></tr>")
-        for key, label, unit in measures:
-            cells = "".join(
-                f'<td class="num">{fmt(tables[y].at[region, key], 1)}</td>' for y in years
-            )
-            rows.append(f'<tr><td class="p2h-indent">{label}</td>'
-                        f'<td class="p2h-unit-col">{unit}</td>{cells}</tr>')
+        for kind, title, domestic_note in _KINDS:
+            rows.append(f'<tr><td colspan="{len(years) + 2}"><b>{html.escape(title)}</b>'
+                        f" <small>(domestic: {html.escape(domestic_note)})</small></td></tr>")
+            for key, label in _MEASURES:
+                unit = "%" if key.endswith("[%]") else "TWh/a"
+                cells = "".join(
+                    f'<td class="num">{fmt(tables[y].at[region, f"{kind} {key}"], 1)}</td>'
+                    for y in years
+                )
+                rows.append(f'<tr><td class="p2h-indent">{label}</td>'
+                            f'<td class="p2h-unit-col">{unit}</td>{cells}</tr>')
     head = "".join(f'<th class="num">{y}</th>' for y in years)
     return (f'<table class="p2h-table"><thead><tr><th>Region</th><th>Unit</th>{head}'
             f"</tr></thead><tbody>{''.join(rows)}</tbody></table>")
+
+
+def _flow_table(balance: SupplyBalance) -> str:
+    flows = balance.electricity_flows()
+    head = "".join(f'<th class="num">to {html.escape(c)}</th>' for c in flows.columns)
+    rows = "".join(
+        f"<tr><td>from {html.escape(r)}</td>"
+        + "".join(f'<td class="num">{"–" if r == c else fmt(flows.at[r, c], 1)}</td>'
+                  for c in flows.columns)
+        + "</tr>"
+        for r in flows.index
+    )
+    return (f'<table class="p2h-table"><thead><tr><th>Electricity [TWh/a]</th>{head}'
+            f"</tr></thead><tbody>{rows}</tbody></table>")
 
 
 def _vector_table(balance: SupplyBalance) -> str:
@@ -120,7 +153,10 @@ def imports_by_vector(ctx, node: str, section) -> Html | None:
     for i, (year, balance) in enumerate(balances.items()):
         parts.append(
             f"<details{' open' if i == 0 else ''}><summary>{year}: imports per energy "
-            f"vector [TWh/a]</summary>{_vector_table(balance)}</details>"
+            f"vector [TWh/a]</summary>{_vector_table(balance)}"
+            f"<p>Gross electricity flows between regions, {year} (sum over lines and "
+            f"DC links, hour by hour, at the sending end):</p>{_flow_table(balance)}"
+            "</details>"
         )
     vectors = ", ".join(IMPORT_FUELS)
     parts.append(
@@ -132,10 +168,14 @@ def imports_by_vector(ctx, node: str, section) -> Html | None:
         "bus), the net annual flow of each non-EU country into or out of that bus. "
         "Capped vectors: " + html.escape(vectors) + ". Electricity is not capped: "
         "imports and exports are the positive and negative parts of the region's hourly "
-        "net exchange over AC lines and DC links. Self-sufficiency = domestic primary "
-        "production / (domestic production + imports − exports); domestic production = "
-        "wind, solar, hydro, biomass, domestic gas, oil, coal and lignite, nuclear heat "
-        "(Eurostat convention); ambient heat of heat pumps is not counted. The cap dual "
-        "is the marginal value of one more MWh of import allowance.</p>"
+        "net exchange over AC lines and DC links; their annual difference is the net import "
+        "(hourly netting does not change it; the gross pairwise flows are shown per year). "
+        "Self-sufficiency = domestic / (domestic + imports − exports), computed "
+        "separately for electricity (domestic: net generation in the region), molecules "
+        "(domestic: primary fuels produced in the region plus electrolytic hydrogen; "
+        "imports and exports: all fuel vectors) and primary energy (all vectors; "
+        "nuclear heat at the Eurostat convention, ambient heat of heat pumps not "
+        "counted). Above 100 %: net exporter. The cap dual is the marginal value of one "
+        "more MWh of import allowance.</p>"
     )
     return Html("".join(parts))

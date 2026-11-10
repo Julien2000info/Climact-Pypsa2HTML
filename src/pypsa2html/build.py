@@ -161,6 +161,9 @@ def render_site(
     left nav still lists the full ``manifest``.
     """
     config = ctx.config
+    from .charts import base as _chart_base
+
+    _chart_base.BAR_MIN_SHARE = float(getattr(config.output, "bar_min_share", 0.02))
     if only_pages:
         unknown = [p for p in only_pages if p not in manifest.ids]
         if unknown:

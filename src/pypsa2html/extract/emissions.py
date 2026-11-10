@@ -187,6 +187,11 @@ class CarbonFlow:
     #: Reuse the value of the preceding row instead of recomputing it -- the
     #: original appended the same number twice, once per direction.
     same_as_previous: bool = False
+    #: Generators only on electricity buses: a power plant modelled as a generator
+    #: burning its fuel implicitly. Without it the "coal" row also counted the coal
+    #: *supply* generator of the EU coal bus, whose CO2 the coal-burning links
+    #: already book (53 / 23 / 21 Mt on the PyPSA-Eur-CANEU NWE run, 2026-11-10).
+    electric_only: bool = False
 
 
 #: The carbon balance, in the order the legacy ``collection.append`` calls ran.
@@ -201,16 +206,16 @@ CARBON_FLOWS: tuple[CarbonFlow, ...] = (
     # is only ever one of the two, so the rows never overlap.
     CarbonFlow("OCGT", "gas", ATMOSPHERE, ("OCGT",), 2),
     CarbonFlow("OCGT", "gas", ATMOSPHERE, ("OCGT",), component="generators", sign=1.0,
-               intensity=("gas", "CO2 intensity")),
+               intensity=("gas", "CO2 intensity"), electric_only=True),
     CarbonFlow("CCGT", "gas", ATMOSPHERE, ("CCGT",), 2),
     CarbonFlow("CCGT", "gas", ATMOSPHERE, ("CCGT",), component="generators", sign=1.0,
-               intensity=("gas", "CO2 intensity")),
+               intensity=("gas", "CO2 intensity"), electric_only=True),
     CarbonFlow("lignite", "coal", ATMOSPHERE, ("lignite",), 2, match="prefix"),
     CarbonFlow("lignite", "coal", ATMOSPHERE, ("lignite",), component="generators", sign=1.0,
-               intensity=("lignite", "CO2 intensity"), match="prefix"),
+               intensity=("lignite", "CO2 intensity"), match="prefix", electric_only=True),
     CarbonFlow("coal", "coal", ATMOSPHERE, ("coal",), 2, match="prefix"),
     CarbonFlow("coal", "coal", ATMOSPHERE, ("coal",), component="generators", sign=1.0,
-               intensity=("coal", "CO2 intensity"), match="prefix"),
+               intensity=("coal", "CO2 intensity"), match="prefix", electric_only=True),
     CarbonFlow("Sabatier", STORED, "gas", ("Sabatier",), 2, sign=1.0, match="prefix"),
     CarbonFlow("SMR", "gas", ATMOSPHERE, ("SMR",), 2),
     CarbonFlow("SMR CC", "gas", ATMOSPHERE, ("SMR CC",), 2, match="prefix"),
@@ -507,7 +512,11 @@ class _Reductions:
 
     def total(self, flow: CarbonFlow) -> float:
         static = getattr(self.network, flow.component).loc[self.selection[flow.component]]
-        selected = static.index[_carrier_mask(static, flow)]
+        mask = _carrier_mask(static, flow)
+        if flow.electric_only and "bus" in static:
+            carrier = static["bus"].map(self.network.buses["carrier"])
+            mask &= carrier.isin(["AC", "low voltage"])
+        selected = static.index[mask]
         if len(selected) == 0:
             return 0.0
         if flow.component == "links":
@@ -818,6 +827,14 @@ def carbon_flows(ctx: BuildContext, node: str) -> pd.DataFrame:
     table = ctx.taxonomy.carrier_flows_carbon
     threshold = ctx.config.model.flow_threshold
     known = set(table["entry"])
+    # Atmosphere ports discovered by topology ("other: <carrier>") have no code of
+    # their own: they go to one "other emissions" row instead of being dropped
+    # (solid biomass import, 12 Mt on the NWE run 2040, was missing from the charts).
+    for column, series in list(values.items()):
+        other = [e for e in series.index if str(e).startswith("other: ")]
+        if other:
+            values[column] = series.drop(index=other)
+            values[column]["other emissions"] = float(series[other].sum())
     folded = {column: fold_ccs_variants(series, known) for column, series in values.items()}
     out = table[["entry", "label", "unit", "code"]].copy()
     for column, series in folded.items():
@@ -827,9 +844,9 @@ def carbon_flows(ctx: BuildContext, node: str) -> pd.DataFrame:
         out[column] = mapped.where(mapped.abs() >= threshold, 0.0)
 
     for column, series in folded.items():
-        unknown = sorted(set(series.index) - known)
+        unknown = sorted(e for e in set(series.index) - known if abs(series[e]) >= threshold)
         if unknown:
-            logger.debug(
+            logger.warning(
                 "%s: %d carbon row(s) with no code: %s", column, len(unknown), unknown
             )
 

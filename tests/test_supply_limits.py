@@ -67,10 +67,25 @@ def test_electricity_hourly_parts_and_self_sufficiency():
     ss = b.self_sufficiency()
     # GB: domestic 2400 MWh wind; imports 3600 gas + 360 elc; exports 4800 gas + 120 elc;
     # a net exporter is above 100 %
-    assert ss.at["GB", "self-sufficiency [%]"] == pytest.approx(
+    assert ss.at["GB", "primary self-sufficiency [%]"] == pytest.approx(
         100 * 2400 / (2400 + 3960 - 4920)
     )
     # BE: domestic 1200 wind; imports 2400 + 4800 gas + 120 elc; exports 360 elc
-    assert ss.at["EU", "self-sufficiency [%]"] == pytest.approx(
+    assert ss.at["EU", "primary self-sufficiency [%]"] == pytest.approx(
         100 * 1200 / (1200 + 7320 - 360)
     )
+
+
+def test_electricity_and_molecules_indicators_are_separate():
+    b = SupplyBalance(network())
+    ss = b.self_sufficiency()
+    # electricity: domestic = wind (GB 2400 MWh), imports 360, exports 120 (MWh)
+    assert ss.at["GB", "electricity domestic"] == pytest.approx(2400 / 1e6 / (24 / 8760))
+    assert ss.at["GB", "electricity self-sufficiency [%]"] == pytest.approx(
+        100 * 2400 / (2400 + 360 - 120))
+    # molecules: no domestic fuel, gas imports 3600, exports to BE 4800 (transit)
+    assert ss.at["EU", "molecules self-sufficiency [%]"] == pytest.approx(0.0)
+    flows = b.electricity_flows()
+    nyears = 24 / 8760
+    assert flows.at["EU", "GB"] == pytest.approx(30 * 12 / 1e6 / nyears)
+    assert flows.at["GB", "EU"] == pytest.approx(10 * 12 / 1e6 / nyears)

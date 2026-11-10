@@ -80,3 +80,28 @@ def test_stacked_bars_sorted_per_bar_legend_as_first_bar():
     assert [t.name for t in legend] == ["a", "d", "b", "c"]
     assert list(order_by_first_horizon(df).index) == ["b", "d", "a", "c"]
     assert list(grouped_bar(df, "%").data[0].x) == ["b", "d", "a", "c"]
+
+
+def test_small_items_merged_into_other_in_every_horizon():
+    """Below the share in every horizon -> "Other"; above it in one horizon -> kept in
+    all horizons; bar totals unchanged (user, 2026-11-10)."""
+    import pandas as pd
+
+    from pypsa2html.charts.base import OTHER_LABEL, merge_small, stacked_bar
+
+    df = pd.DataFrame(
+        {"2030": [90.0, 9.0, 0.5, 0.5], "2040": [50.0, 0.1, 0.4, 49.5]},
+        index=["big", "medium", "tiny1", "grows"],
+    )
+    out = merge_small(df, 0.02)
+    assert "grows" in out.index  # 0.5 % in 2030 but 49.5 % in 2040: kept everywhere
+    assert "medium" in out.index  # 9 % in 2030
+    # a single small item is not worth an "Other" entry
+    assert "tiny1" in out.index and OTHER_LABEL not in out.index
+    df.loc["tiny2"] = [0.2, 0.0]
+    out = merge_small(df, 0.02)
+    assert "tiny1" not in out.index and "tiny2" not in out.index
+    assert out.loc[OTHER_LABEL].tolist() == pytest.approx([0.7, 0.4])
+    assert out.sum().tolist() == pytest.approx(df.sum().tolist())
+    fig = stacked_bar(df, None, "TWh", signed=False, min_share=0.02)
+    assert OTHER_LABEL in {t.name for t in fig.data}

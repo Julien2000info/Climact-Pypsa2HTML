@@ -513,6 +513,27 @@ def order_by_first_horizon(data: pd.DataFrame) -> pd.DataFrame:
     return data.iloc[order]
 
 
+#: Default of ``output.bar_min_share`` (set from the config at build time).
+BAR_MIN_SHARE = 0.02
+#: Name and colour of the merged small categories.
+OTHER_LABEL = "Other (small items)"
+OTHER_COLOR = "#b0b0b0"
+
+
+def merge_small(data: pd.DataFrame, min_share: float) -> pd.DataFrame:
+    """Merge the categories (rows) below ``min_share`` of their bar's absolute total
+    in every horizon (column) into one :data:`OTHER_LABEL` row."""
+    if not min_share or data.empty:
+        return data
+    total = data.abs().sum(axis=0).replace(0.0, float("nan"))
+    share = data.abs().div(total, axis=1).fillna(0.0)
+    small = share.index[(share < min_share).all(axis=1)]
+    if len(small) < 2:  # merging a single item gains nothing
+        return data
+    other = data.loc[small].sum(axis=0).rename(OTHER_LABEL)
+    return pd.concat([data.drop(index=small), other.to_frame().T])
+
+
 def _largest_first(values: pd.Series) -> list:
     """Non-zero categories of one bar, largest absolute value first (stable)."""
     v = values.astype(float).fillna(0.0)
@@ -528,6 +549,7 @@ def stacked_bar(
     *,
     signed: bool = True,
     scale: float = 1.0,
+    min_share: float | None = None,
 ) -> go.Figure | None:
     """Stacked (or relative) bar chart of a tech × year table.
 
@@ -552,9 +574,11 @@ def stacked_bar(
     data = data.loc[~(data == 0).all(axis=1)]
     if data.empty:
         return None
+    data = merge_small(data, BAR_MIN_SHARE if min_share is None else min_share)
     years = [str(c) for c in data.columns]
     data.columns = years
     palette = dict(colors or {})
+    palette.setdefault(OTHER_LABEL, OTHER_COLOR)
 
     # legend: first bar top-down (positives from the top of the stack, then
     # negatives from the axis down), then categories that appear later

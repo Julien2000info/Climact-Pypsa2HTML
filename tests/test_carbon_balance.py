@@ -160,3 +160,42 @@ def test_carbon_sankey_transformation_nodes_balance_on_the_nwe_run(tmp_path):
         imb = indicators.graph_imbalances(flows, ctx.taxonomy,
                                           codes=indicators.CARBON_BALANCE_NODES)
         assert imb.empty, (node, imb.to_dict("records"))
+
+
+@pytest.mark.skipif(not (RUN / "results" / RUN_NAME / "networks").exists(),
+                    reason="PyPSA-Eur-CANEU NW Europe run not on disk")
+def test_reported_emissions_equal_the_models_atmosphere(tmp_path):
+    """The emissions-by-sector total and the carbon Sankey's net equal the CO2 the
+    model leaves in the atmosphere (2026-11-10: carbon-neutral import uptakes and
+    discovered atmosphere ports were missing, a coal supply generator was counted
+    as combustion)."""
+    import yaml
+
+    from pypsa2html import indicators
+    from pypsa2html.config import load_config
+    from pypsa2html.context import build_context
+
+    cfg = {
+        "root": str(RUN),
+        "model": {"network_pattern": "networks/solved_{horizon}.nc", "flow_threshold": 0.01},
+        "nodes": {"detect": True, "aggregate": {"enabled": True, "code": "ALL",
+                                                "label": "All countries"}},
+        "scenarios": [{"name": RUN_NAME, "label": RUN_NAME,
+                       "results_dir": f"results/{RUN_NAME}",
+                       "resources_dir": f"resources/{RUN_NAME}"}],
+        "output": {"dir": str(tmp_path / "html")},
+    }
+    path = tmp_path / "p2h.yaml"
+    path.write_text(yaml.safe_dump(cfg))
+    ctx = build_context(load_config(path), RUN_NAME)
+    data = indicators.for_node(ctx, "ALL")
+    total = data.ghg_sector.sum(axis=1)
+    for year in total.index:
+        n = ctx.networks[int(year)]
+        atm = n.stores.index[n.stores.carrier == "co2"]
+        model = float(n.stores_t.e[atm].iloc[-1].sum()) / 1e6
+        assert total[year] == pytest.approx(model, abs=0.5), year
+        row = data.flows_co2.loc[year]
+        net = sum(v for (a, b, t), v in row.items()
+                  if a == "atm" and b in ("net_ghg", "netcap_ghg", "netoth_ghg"))
+        assert net == pytest.approx(model, abs=0.5), year

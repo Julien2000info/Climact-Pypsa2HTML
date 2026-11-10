@@ -214,6 +214,9 @@ NUCLEAR_PRIMARY_ELECTRICAL = frozenset(
 
 #: GHG nodes that represent a *removal*; their bar is drawn below the axis.
 GHG_REMOVALS: tuple[str, ...] = (
+    # carbon-neutral imports (PyPSA-Eur imports, PyPSA-Eur-CANEU bio imports): their
+    # combustion is booked in the using sector, the CO2 taken up abroad here
+    "cni_ghg",
     "lufnes_ghg",
     "blg_ghg",
     "dac_ghg",

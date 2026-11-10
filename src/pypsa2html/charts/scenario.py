@@ -215,7 +215,7 @@ def _table_comparison(
             figures.append(
                 (_difference_label(label, reference),
                  stacked_bar(diff, colors, unit=section.unit, title="", signed=True,
-                             scale=scale))
+                             scale=scale, min_share=0))
             )
             deltas[label] = total_df[label] - total_df[reference]
         figures.append(

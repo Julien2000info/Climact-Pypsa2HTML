@@ -98,7 +98,7 @@ _DEMAND_CODES: dict[str, tuple[str, str]] = {
     "demandheats": ("heat", "Residential and tertiary heat demand"),
     "presenccfind": ("solid biomass", "solid biomass for Industry"),
     "presenccfindd": ("solid biomass", "solid biomass for Industry"),
-    "preammind": ("hydrogen", "NH3"),
+    "preammind": ("ammonia", "NH3"),  # own carrier and Sankey node, not hydrogen
     "prespetcfind": ("oil", "Oil for industry"),
     # Non-electric cooking (PyPSA-Eur-CANEU, PatEx soft-link).
     "presgazcfcook": ("methane", "gas for cooking demand"),

@@ -17,11 +17,20 @@ The component lists mirror ``scripts/_import_limits_config.py`` of PyPSA-Eur-CAN
 (``IMPORT_FUELS``, ``PIPELINES``, ``POOLS``) and the pool flow of
 ``solve_network.pool_net_flow``; keep them in step.
 
-Self-sufficiency of a region = domestic primary production / (domestic production +
-imports − exports), every vector in TWh. Domestic production: generator output except
-the import components (wind, solar, run-of-river, biomass, domestic gas / oil / coal /
-lignite), hydro inflow, and nuclear heat (reactor fuel input, Eurostat convention).
-Ambient heat of heat pumps is not counted.
+Self-sufficiency of a region, three indicators (each = domestic / (domestic + imports −
+exports), TWh; net imports are annual, so hourly netting does not change them):
+
+- **electricity**: domestic = net electricity generation in the region (generators on
+  electricity buses, hydro dispatch, conversion links into electricity: thermal plants,
+  CHP, nuclear, fuel cells; storage and grid links excluded); imports / exports = the
+  parts of the region's hourly net exchange.
+- **molecules** (fuels): domestic = primary fuels produced in the region (domestic gas,
+  oil, coal, lignite, solid biomass, biogas) plus hydrogen from electrolysis (fuels made
+  from it downstream are transformations, not counted again); imports / exports = every
+  fuel vector of the table (from outside the model and from the other regions).
+- **primary** (both together): domestic primary production (wind, solar, hydro,
+  biomass, domestic fossil fuels, nuclear heat at the Eurostat convention) over all
+  vectors; ambient heat of heat pumps not counted.
 """
 
 from __future__ import annotations
@@ -295,6 +304,72 @@ class SupplyBalance:
         total += _energy(n.links_t.p0.reindex(columns=reactors, fill_value=0.0), self.w).sum()
         return self._twh(total)
 
+    def electricity_generation(self, region: Region) -> float:
+        """Net electricity generation in the region [TWh/a]."""
+        n = self.n
+        elec = {"AC", "low voltage"}
+        bus_carrier = n.buses["carrier"]
+        gens = n.generators.index[
+            n.generators.bus.map(bus_carrier).isin(elec)
+            & ~n.generators.carrier.str.contains("vent|load|shedding", regex=True)
+        ]
+        gens = gens[_in_region(self.gen_ct.reindex(gens), region).values]
+        total = self.gen_e.reindex(gens).clip(lower=0).sum()
+        su = n.storage_units
+        if not su.empty:
+            hydro = su.index[(su.carrier == "hydro")
+                             & _in_region(su.bus.map(self.bus_ct), region).values]
+            if len(hydro):
+                total += _energy(n.storage_units_t.p.reindex(columns=hydro, fill_value=0.0)
+                                 .clip(lower=0), self.w).sum()
+        links = n.links
+        conv = links.index[
+            links.bus1.map(bus_carrier).isin(elec)
+            & ~links.bus0.map(bus_carrier).isin(elec)
+            & ~links.carrier.str.contains("battery|V2G|discharger|EV", regex=True)
+        ]
+        conv = conv[_in_region(self.link_ct.reindex(conv), region).values]
+        total += self._link_out(conv).clip(lower=0).sum()
+        return self._twh(total)
+
+    def molecules_domestic(self, region: Region) -> float:
+        """Primary fuels produced in the region plus electrolytic hydrogen [TWh/a]."""
+        n = self.n
+        elec = {"AC", "low voltage"}
+        gens = n.generators.index[
+            ~n.generators.bus.map(n.buses["carrier"]).isin(elec)
+            & ~n.generators.carrier.isin(NOT_DOMESTIC)
+            & ~n.generators.carrier.str.contains("vent|load|shedding|solar thermal|heat",
+                                                regex=True)
+        ]
+        gens = gens[_in_region(self.gen_ct.reindex(gens), region).values]
+        total = self.gen_e.reindex(gens).clip(lower=0).sum()
+        el = n.links.index[n.links.carrier == "H2 Electrolysis"]
+        el = el[_in_region(self.link_ct.reindex(el), region).values]
+        total += self._link_out(el).sum()
+        return self._twh(total)
+
+    def electricity_flows(self) -> pd.DataFrame:
+        """Gross annual electricity flows between regions [TWh/a], sender x receiver,
+        measured at the sending end of each line / DC link (hour by hour, per branch)."""
+        n = self.n
+        region_of = {c: r.name for r in self.regions for c in r.countries}
+        names = [r.name for r in self.regions]
+        out = pd.DataFrame(0.0, index=names, columns=names)
+        for kind, df in (("lines", n.lines),
+                         ("links", n.links[n.links.carrier.isin(ELECTRICITY_LINKS)])):
+            if df.empty:
+                continue
+            t = getattr(n, f"{kind}_t")
+            r0 = df.bus0.map(self.bus_ct).map(region_of)
+            r1 = df.bus1.map(self.bus_ct).map(region_of)
+            cross = df.index[r0.notna() & r1.notna() & (r0 != r1)]
+            for i in cross:
+                p0 = t.p0[i] if i in t.p0 else pd.Series(0.0, index=n.snapshots)
+                out.at[r0[i], r1[i]] += float(p0.clip(lower=0).mul(self.w).sum())
+                out.at[r1[i], r0[i]] += float((-p0).clip(lower=0).mul(self.w).sum())
+        return out / 1e6 / self.nyears
+
     def table(self) -> pd.DataFrame:
         """Rows (region, vector); columns :data:`COLUMNS` [TWh/a]."""
         rows = {}
@@ -309,23 +384,32 @@ class SupplyBalance:
         return df
 
     def self_sufficiency(self) -> pd.DataFrame:
-        """Per region: domestic production, imports, exports [TWh/a], ratio [%]."""
+        """Per region: domestic, imports, exports [TWh/a] and self-sufficiency [%] for
+        electricity, molecules and primary energy (see the module docstring)."""
         table = self.table()
+
+        def ratio(domestic, imports, exports):
+            supply = domestic + imports - exports
+            return 100.0 * domestic / supply if supply > 1e-6 else np.nan
+
         out = {}
         for region in self.regions:
             t = table.loc[region.name]
-            domestic = self.domestic(region)
-            imports = float(t["total imports"].sum())
-            exports = float(t["exports to modelled regions"].sum())
-            supply = domestic + imports - exports
             elc = t.loc["electricity"]
-            out[region.name] = {
-                "domestic production": domestic,
-                "imports": imports,
-                "exports": exports,
-                "self-sufficiency [%]": 100.0 * domestic / supply if supply > 1e-6 else np.nan,
-                "electricity net import": float(
-                    elc["total imports"] - elc["exports to modelled regions"]
-                ),
-            }
+            fuels = t.drop(index="electricity")
+            row = {}
+            for kind, domestic, imports, exports in (
+                ("electricity", self.electricity_generation(region),
+                 float(elc["total imports"]), float(elc["exports to modelled regions"])),
+                ("molecules", self.molecules_domestic(region),
+                 float(fuels["total imports"].sum()),
+                 float(fuels["exports to modelled regions"].sum())),
+                ("primary", self.domestic(region), float(t["total imports"].sum()),
+                 float(t["exports to modelled regions"].sum())),
+            ):
+                row[f"{kind} domestic"] = domestic
+                row[f"{kind} imports"] = imports
+                row[f"{kind} exports"] = exports
+                row[f"{kind} self-sufficiency [%]"] = ratio(domestic, imports, exports)
+            out[region.name] = row
         return pd.DataFrame(out).T
