@@ -79,6 +79,7 @@ from ..context import BuildContext
 from .flows import (
     _cache_get,
     _link_port_totals,
+    _load_totals,
     _node_value,
     _one_port_totals,
     _resource,
@@ -106,50 +107,60 @@ _DEFAULT_INTENSITY = {
 }
 
 
-#: ``CarbonFlow.intensity`` marker: the CO2 intensity of oil as the network burns
-#: it (see :func:`network_oil_intensity`), instead of a cost-table parameter.
+#: ``CarbonFlow.intensity`` markers: the CO2 intensity of a fuel as the network
+#: burns it (see :func:`network_fuel_intensity`), instead of a cost-table parameter.
 NETWORK_OIL_INTENSITY = ("network", "oil")
+NETWORK_GAS_INTENSITY = ("network", "gas")
 
-#: Links on the oil bus that are not combustion at the oil intensity: their CO2
-#: port carries something else (a process share, refinery fuel).
-_NOT_OIL_COMBUSTION = ("naphtha for industry", "oil refining")
+#: Loads drawing gas as a material (carbon not emitted by the model).
+GAS_FEEDSTOCK_LOADS = ("gas feedstock for industry",)
+
+#: Links on a fuel bus whose CO2 ports do not carry the fuel's whole carbon (a
+#: process share, refinery fuel): left out of the fuel's intensity.
+_NOT_FUEL_COMBUSTION = {"oil": ("naphtha for industry", "oil refining"), "gas": ()}
 
 
-def network_oil_intensity(ctx, network, horizon) -> float | None:
-    """Input-weighted CO2 intensity [t/MWh] of the links burning oil, or ``None``.
+def network_fuel_intensity(ctx, network, horizon, fuel: str) -> float | None:
+    """Input-weighted carbon content [tCO2/MWh] of ``fuel`` as the network uses it.
 
-    Read from the network (efficiency of the atmosphere port of every link whose
-    bus0 is an oil bus), because a model may set its own intensities (PyPSA-Eur-
-    CANEU: PatEx's) while the cost table keeps technology-data's. Weighted by
-    the annual input; the static mean when nothing runs.
+    For every link whose bus0 is a ``fuel`` bus and that has CO2 ports, its
+    intensity is the sum of the efficiencies of those ports (atmosphere and
+    stored, so capture plants count whole); weighted by the annual input, the
+    static mean when nothing runs. ``None`` without such links. Read from the
+    network because a model may set its own intensities (PyPSA-Eur-CANEU:
+    PatEx's) while the cost table keeps technology-data's.
     """
-    key = ("network_oil_intensity", int(horizon))
+    key = ("network_fuel_intensity", fuel, int(horizon))
     files = getattr(ctx, "_files", None)
     if files is not None and key in files:
         return files[key]
     links = network.links
     bus_carrier = network.buses["carrier"]
-    oil = links.bus0.map(bus_carrier).eq("oil") & ~links.carrier.isin(_NOT_OIL_COMBUSTION)
-    weights, values = [], []
+    users = links.index[links.bus0.map(bus_carrier).eq(fuel)
+                        & ~links.carrier.isin(_NOT_FUEL_COMBUSTION.get(fuel, ()))]
+    carbon = pd.Series(0.0, index=users)
     for port in range(1, 6):
         bus, eff = f"bus{port}", "efficiency" if port == 1 else f"efficiency{port}"
         if bus not in links or eff not in links:
             continue
-        hit = links.index[oil & links[bus].map(bus_carrier).map(
-            lambda c: _is_atmosphere_carrier(str(c)) if isinstance(c, str) else False)]
-        if hit.empty:
-            continue
-        p0 = network.links_t.p0.reindex(columns=hit, fill_value=0.0)
-        w = p0.mul(network.snapshot_weightings.generators, axis=0).sum()
-        weights.append(w)
-        values.append(links.loc[hit, eff])
+        port_carrier = links.loc[users, bus].map(bus_carrier).fillna("").astype(str)
+        co2 = port_carrier.map(lambda c: _is_atmosphere_carrier(c) or _is_stored_carrier(c))
+        carbon += links.loc[users, eff].where(co2, 0.0).fillna(0.0)
+    users = carbon.index[carbon > 0]
     result = None
-    if weights:
-        w, v = pd.concat(weights), pd.concat(values)
+    if len(users):
+        p0 = network.links_t.p0.reindex(columns=users, fill_value=0.0)
+        w = p0.mul(network.snapshot_weightings.generators, axis=0).sum()
+        v = carbon[users]
         result = float((w * v).sum() / w.sum()) if w.sum() > 0 else float(v.mean())
     if files is not None:
         files[key] = result
     return result
+
+
+def network_oil_intensity(ctx, network, horizon) -> float | None:
+    """:func:`network_fuel_intensity` of oil."""
+    return network_fuel_intensity(ctx, network, horizon, "oil")
 
 
 @dataclass(frozen=True)
@@ -298,7 +309,7 @@ CARBON_FLOWS: tuple[CarbonFlow, ...] = (
     CarbonFlow("HVC to air", "oil", ATMOSPHERE, ("HVC to air",), 1),
     CarbonFlow("fossil gas", "fossil gas", "gas", ("gas", "gas production"),
                component="generators", sign=1.0,
-               intensity=("gas", "CO2 intensity")),
+               intensity=NETWORK_GAS_INTENSITY),
     # Refined oil at the CO2 intensity the network's oil uses emit with (PatEx
     # intensities in PyPSA-Eur-CANEU), not the cost table's: the oil node must
     # receive the carbon its outflows carry (2026-11-10).
@@ -513,11 +524,12 @@ class _Reductions:
 def _flow_value(ctx: BuildContext, reductions: _Reductions, flow: CarbonFlow) -> float:
     """One row of the carbon balance, in MtCO2."""
     value = flow.sign * reductions.total(flow)
-    if flow.intensity == NETWORK_OIL_INTENSITY:
-        intensity = network_oil_intensity(ctx, reductions.network, reductions.horizon)
+    if flow.intensity in (NETWORK_OIL_INTENSITY, NETWORK_GAS_INTENSITY):
+        fuel = flow.intensity[1]
+        intensity = network_fuel_intensity(ctx, reductions.network, reductions.horizon, fuel)
         if intensity is None:
-            intensity = ctx.cost("oil", "CO2 intensity",
-                                 default=_DEFAULT_INTENSITY[("oil", "CO2 intensity")])
+            intensity = ctx.cost(fuel, "CO2 intensity",
+                                 default=_DEFAULT_INTENSITY[(fuel, "CO2 intensity")])
         value *= intensity
     elif flow.intensity is not None:
         value *= ctx.cost(*flow.intensity, default=_DEFAULT_INTENSITY.get(flow.intensity, 0.0))
@@ -699,6 +711,19 @@ def _balance_for_horizon(ctx: BuildContext, node: str, horizon: int) -> pd.DataF
     # (PatEx / inventory convention, PyPSA-Eur-CANEU ``patex.plastics_eol_co2:
     # false``), or emitted later through the waste stream (HVC to air, waste CHP).
     value = lambda entry: float(balance.loc[balance["entry"] == entry, "value"].sum())  # noqa: E731
+    # Gas used as feedstock (a load on the gas buses, PyPSA-Eur-CANEU's PatEx
+    # "gas feedstock for industry"): its carbon is not emitted by the model.
+    feedstock = 0.0
+    network = reductions.network
+    loads = ctx.component_index(horizon, "loads", node)
+    loads = loads[network.loads.loc[loads, "carrier"].astype(str).isin(GAS_FEEDSTOCK_LOADS)]
+    if len(loads):
+        feedstock = float(_load_totals(ctx, horizon).reindex(loads).fillna(0.0).sum())
+        gas = network_fuel_intensity(ctx, network, horizon, "gas")
+        feedstock *= gas if gas is not None else ctx.cost(
+            "gas", "CO2 intensity", default=_DEFAULT_INTENSITY[("gas", "CO2 intensity")])
+    extras.append(("gas feedstock carbon", "gas feedstock carbon", "gas", "products",
+                   feedstock))
     extras.append((
         "naphtha carbon in products", "naphtha carbon in products", "naphtha", "products",
         value("naphtha carbon") - value("naphtha for industry") - value("HVC to air"),

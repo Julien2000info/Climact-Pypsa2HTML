@@ -1128,22 +1128,8 @@ def _close_carbon_graph(
     """
     tax = ctx.taxonomy
     ghg_sectors = tax.codes_of_type("GHG_SECTORS")
-    pe = tax.codes_of_type("PRIMARY_ENERGIES")
-    fe = tax.codes_of_type("FINAL_ENERGIES")
     years = flows_co2.index
     aggregate = _study_wide(ctx, node)
-
-    pe_supply = sum_by(flows, where="Source", nodes=pe, by="Source")
-    fe_use = sum_by(flows, where="Source", nodes=fe, by="Source")
-
-    gas_intensity = ctx.cost("gas", "CO2 intensity", default=float("nan"))
-    methanol_co2 = ctx.cost("methanolisation", "carbondioxide-input", default=float("nan"))
-
-    # -- fossil gas emissions, from the gas actually burnt -----------------
-    if not aggregate and np.isfinite(gas_intensity):
-        flows_co2[("fgs_ghg", "gas_ghg", "")] = (
-            pe_supply.get("gaz_pe", _zeros(years)) * gas_intensity
-        )
 
     # -- net emissions: gross minus the biogenic and land-use sinks --------
     # With features.capped_emissions on, the net is drawn as two edges instead,
@@ -1167,29 +1153,37 @@ def _close_carbon_graph(
             - column(flows_co2, ("atm", "blg_ghg", "cc"))
         )
 
-    # -- methanol trade carries its embodied CO2 ---------------------------
-    if not aggregate and np.isfinite(methanol_co2):
-        demand = fe_use.get("met_fe", _zeros(years))
-        # methanolisation (process node) and biomass-to-methanol
-        produced = column(flows, ("mtn", "met_fe", "")) + column(flows, ("enc_pe", "met_fe", ""))
-        flows_co2[("hth_ghg", "met_ghg", "")] = (demand - produced) * methanol_co2
-        flows_co2[("met_ghg", "eth_ghg", "")] = (produced - demand) * methanol_co2
-
-    # -- a country draws its oil from the EU-wide oil bus: its fossil inflow is
-    # every carbon flow leaving its oil node (combustion, naphtha feedstock,
-    # exports...) minus the non-fossil inflows (synthetic, bio, imported
-    # neutral). The study-wide node reads it from the refineries instead.
+    # -- methanol trade carries its embodied CO2: a country's methanol node
+    # sits on the EU-wide methanol bus, so what it burns beyond what it makes
+    # came in (imported), the rest went out (exported). The residual of the node,
+    # at the carbon the model's own flows carry (the cost table's methanolisation
+    # CO2 input differs from the model's intensities, 3 Mt at GB00AC, 2026-11-10).
     if not aggregate:
-        out_oil = sum_by(flows_co2, where="Source", nodes=["oil_ghg"], by="Source")
-        in_oil = sum_by(flows_co2, where="Target", nodes=["oil_ghg"], by="Target")
-        fossil = [c for c in flows_co2.columns if c[0] == "fol_ghg" and c[1] == "oil_ghg"]
-        other_in = in_oil.get("oil_ghg", _zeros(years)) - sum(
-            (flows_co2[c] for c in fossil), _zeros(years))
-        for c in fossil:
-            flows_co2[c] = _zeros(years)
-        flows_co2[("fol_ghg", "oil_ghg", "")] = (
-            out_oil.get("oil_ghg", _zeros(years)) - other_in
-        )
+        for edge in (("hth_ghg", "met_ghg", ""), ("met_ghg", "eth_ghg", "")):
+            flows_co2[edge] = _zeros(years)
+        out_m = sum_by(flows_co2, where="Source", nodes=["met_ghg"], by="Source")
+        in_m = sum_by(flows_co2, where="Target", nodes=["met_ghg"], by="Target")
+        net = out_m.get("met_ghg", _zeros(years)) - in_m.get("met_ghg", _zeros(years))
+        flows_co2[("hth_ghg", "met_ghg", "")] = net.clip(lower=0.0)
+        flows_co2[("met_ghg", "eth_ghg", "")] = (-net).clip(lower=0.0)
+
+    # -- a country draws its oil from the EU-wide oil bus and its gas through
+    # pipelines it does not book: its fossil inflow is every carbon flow leaving
+    # the fuel node (combustion, capture, feedstock, ...) minus the non-fossil
+    # inflows (synthetic, bio, imported neutral). The study-wide node reads them
+    # from the refineries and the gas supply, so its balance is a real check.
+    if not aggregate:
+        for fossil_node, fuel_node in (("fol_ghg", "oil_ghg"), ("fgs_ghg", "gas_ghg")):
+            out_f = sum_by(flows_co2, where="Source", nodes=[fuel_node], by="Source")
+            in_f = sum_by(flows_co2, where="Target", nodes=[fuel_node], by="Target")
+            fossil = [c for c in flows_co2.columns if c[0] == fossil_node and c[1] == fuel_node]
+            other_in = in_f.get(fuel_node, _zeros(years)) - sum(
+                (flows_co2[c] for c in fossil), _zeros(years))
+            for c in fossil:
+                flows_co2[c] = _zeros(years)
+            flows_co2[(fossil_node, fuel_node, "")] = (
+                out_f.get(fuel_node, _zeros(years)) - other_in
+            )
 
     # -- process emissions: the naphtha share enters from the naphtha node, the
     # rest (calcination, ...) is drawn from "industrial processes" ------------
@@ -1198,18 +1192,6 @@ def _close_carbon_graph(
     flows_co2[("indnes_ghg", "pro_ghg", "")] = (
         out_pro.get("pro_ghg", _zeros(years)) - in_pro.get("pro_ghg", _zeros(years))
     )
-
-    # -- for the aggregate node, fossil gas is the residual ----------------
-    if aggregate:
-        outflows = sum_by(flows_co2, where="Source", nodes=ghg_sectors, by="Source")
-        flows_co2[("fgs_ghg", "gas_ghg", "")] = (
-            outflows.get("gas_ghg", _zeros(years))
-            - column(flows_co2, ("blg_ghg", "gas_ghg", ""))
-            - column(flows_co2, ("blg_ghg", "gas_ghg", "cc"))
-            - column(flows_co2, ("bm_ghg", "gas_ghg", ""))
-            - column(flows_co2, ("bm_ghg", "gas_ghg", "cc"))
-            - column(flows_co2, ("stm", "gas_ghg", ""))
-        )
 
     return flows_co2
 

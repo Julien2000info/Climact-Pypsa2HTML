@@ -20,6 +20,8 @@ from pypsa2html.extract.emissions import _balance_for_horizon, network_oil_inten
 
 COST_OIL = 0.2571  # cost table (technology-data)
 MODEL_OIL = 0.2639  # what the network's oil uses emit with (PatEx)
+COST_GAS = 0.198
+MODEL_GAS = 0.2024
 
 
 def _network():
@@ -56,8 +58,27 @@ def _network():
         "p2": {"refinery": -100 * 0.0115, "A transport oil": -70 * MODEL_OIL,
                "A naphtha": -25 * 0.0122, "A process": 0.0, "A HVC to air": 0.0},
     }
+    # gas: 10 TWh supplied = 5 burnt in a CCGT + 1 in a CCGT with capture (90 %
+    # stored) + 4 used as feedstock (a load, no carbon port)
+    n.add("Carrier", ["gas", "co2 stored"])
+    n.add("Bus", "A gas", carrier="gas", location="A")
+    n.add("Bus", "A co2 stored", carrier="co2 stored", location="A")
+    n.add("Generator", "A gas", bus="A gas", carrier="gas")
+    n.add("Link", "A CCGT", bus0="A gas", bus1="A", bus2="co2 atmosphere", carrier="CCGT",
+          efficiency2=MODEL_GAS)
+    n.add("Link", "A CCGT CC", bus0="A gas", bus1="A", bus2="co2 atmosphere",
+          bus3="A co2 stored", carrier="CCGT CC", efficiency2=0.1 * MODEL_GAS,
+          efficiency3=0.9 * MODEL_GAS)
+    n.add("Load", "A gas feedstock", bus="A gas", carrier="gas feedstock for industry",
+          p_set=4.0)
+    n.generators_t.p = pd.DataFrame({"A gas": [10.0]}, index=n.snapshots)
+    p["p0"].update({"A CCGT": 5.0, "A CCGT CC": 1.0})
+    p["p1"].update({"A CCGT": -2.5, "A CCGT CC": -0.5})
+    p["p2"].update({"A CCGT": -5 * MODEL_GAS, "A CCGT CC": -0.1 * MODEL_GAS})
+    p["p3"] = {"A CCGT CC": -0.9 * MODEL_GAS}
     for port, values in p.items():
-        setattr(n.links_t, port, pd.DataFrame(values, index=n.snapshots))
+        setattr(n.links_t, port, pd.DataFrame(values, index=n.snapshots).reindex(
+            columns=n.links.index, fill_value=0.0))
     return n
 
 
@@ -67,13 +88,29 @@ def _ctx(network):
         _files={},
         config=SimpleNamespace(raw={}),
         component_index=lambda horizon, component, node: getattr(network, component).index,
-        cost=lambda tech, param, default=None: COST_OIL if tech == "oil" else default,
+        cost=lambda tech, param, default=None: {"oil": COST_OIL, "gas": COST_GAS}.get(
+            tech, default),
     )
 
 
 def test_network_oil_intensity_is_the_models_not_the_cost_tables():
     n = _network()
     assert network_oil_intensity(_ctx(n), n, 2050) == pytest.approx(MODEL_OIL)
+
+
+def test_gas_node_conserves_carbon_capture_and_feedstock_included():
+    from pypsa2html.extract.emissions import network_fuel_intensity
+
+    n = _network()
+    # capture plants count whole (atmosphere + stored ports)
+    assert network_fuel_intensity(_ctx(n), n, 2050, "gas") == pytest.approx(MODEL_GAS)
+    b = _balance_for_horizon(_ctx(n), "ALL", 2050).set_index("entry")["value"]
+    assert b["fossil gas"] == pytest.approx(10 * MODEL_GAS)
+    assert b["gas feedstock carbon"] == pytest.approx(4 * MODEL_GAS)
+    capture_plant = sum(v for k, v in b.items() if "CCGT CC" in k)  # residual + stored
+    assert capture_plant == pytest.approx(1 * MODEL_GAS)
+    assert b["fossil gas"] == pytest.approx(
+        b["CCGT"] + capture_plant + b["gas feedstock carbon"])
 
 
 def test_oil_node_conserves_carbon():
@@ -96,7 +133,8 @@ RUN_NAME = "patex-levers2-nwe-bz-co2-cap-50-24h"
 @pytest.mark.skipif(not (RUN / "results" / RUN_NAME / "networks").exists(),
                     reason="PyPSA-Eur-CANEU NW Europe run not on disk")
 def test_carbon_sankey_transformation_nodes_balance_on_the_nwe_run(tmp_path):
-    """Study-wide oil, naphtha and process-emission nodes conserve carbon."""
+    """Carbon transformation nodes conserve carbon: study-wide (measured fossil
+    inflows) and per country (EU and non-EU)."""
     import yaml
 
     from pypsa2html import indicators
@@ -117,7 +155,8 @@ def test_carbon_sankey_transformation_nodes_balance_on_the_nwe_run(tmp_path):
     path.write_text(yaml.safe_dump(cfg))
     config = load_config(path)
     ctx = build_context(config, RUN_NAME)
-    flows = indicators.for_node(ctx, "ALL").flows_co2
-    imb = indicators.graph_imbalances(flows, ctx.taxonomy,
-                                      codes=["oil_ghg", "hvc_ghg", "pro_ghg"])
-    assert imb.empty, imb.to_dict("records")
+    for node in ("ALL", "DE00AC", "GB00AC"):
+        flows = indicators.for_node(ctx, node).flows_co2
+        imb = indicators.graph_imbalances(flows, ctx.taxonomy,
+                                          codes=indicators.CARBON_BALANCE_NODES)
+        assert imb.empty, (node, imb.to_dict("records"))
