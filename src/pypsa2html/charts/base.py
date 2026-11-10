@@ -525,6 +525,8 @@ def merge_small(data: pd.DataFrame, min_share: float) -> pd.DataFrame:
     in every horizon (column) into one :data:`OTHER_LABEL` row."""
     if not min_share or data.empty:
         return data
+    data = data.copy()
+    data.attrs = {}  # e.g. the demand table's "groups" Series: concat cannot compare it
     total = data.abs().sum(axis=0).replace(0.0, float("nan"))
     share = data.abs().div(total, axis=1).fillna(0.0)
     small = share.index[(share < min_share).all(axis=1)]

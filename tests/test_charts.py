@@ -105,3 +105,15 @@ def test_small_items_merged_into_other_in_every_horizon():
     assert out.sum().tolist() == pytest.approx(df.sum().tolist())
     fig = stacked_bar(df, None, "TWh", signed=False, min_share=0.02)
     assert OTHER_LABEL in {t.name for t in fig.data}
+
+
+def test_small_items_merge_keeps_working_with_frame_attrs():
+    """The sectoral-demand table carries a Series in .attrs; concat used to fail."""
+    import pandas as pd
+
+    from pypsa2html.charts.base import stacked_bar
+
+    df = pd.DataFrame({"2030": [90.0, 0.5, 0.4], "2040": [80.0, 0.3, 0.2]},
+                      index=["a", "b", "c"])
+    df.attrs["groups"] = pd.Series(["x", "x", "y"], index=df.index)
+    assert stacked_bar(df, None, "TWh", signed=False, min_share=0.02) is not None
