@@ -15,7 +15,7 @@ dropped as a Generator (``lignite`` fuel potential):
   *service* bus (and pipelines).  Drop load-shedding, vents, and fuel
   Generators whose bus carrier equals the component carrier.
 * **Storage chart** — keep Store carriers on battery / H2 / gas / water /
-  NH3 buses; drop fuel and CO2 stocks.
+  methanol buses; drop NH3, fuel and CO2 stocks.
 """
 
 from __future__ import annotations
@@ -56,10 +56,11 @@ def _is_energy_store_bus(bus_carrier: Any) -> bool:
     if bus_carrier is None or (isinstance(bus_carrier, float) and pd.isna(bus_carrier)):
         return False
     name = str(bus_carrier)
-    # H2 / methane stores and batteries / thermal stores.  NH3 and commodity
-    # stocks (oil, coal, CO2, …) are excluded — their e_nom is typically an
-    # unconstrained buffer, not a plotted storage capacity.
-    if name in {"H2", "gas"} or "H2" in name:
+    # H2 / methane / methanol stores and batteries / thermal stores.  NH3 and
+    # commodity stocks (oil, coal, CO2, …) are excluded — their e_nom is
+    # typically an unconstrained buffer, not a plotted storage capacity.
+    # Methanol: a costed, extendable store in PyPSA-Eur (user, 2026-11-10).
+    if name in {"H2", "gas", "methanol"} or "H2" in name:
         return True
     return "battery" in name or "water" in name
 

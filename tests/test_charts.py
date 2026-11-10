@@ -58,3 +58,19 @@ def test_resolvable_builder_returns_chart_result(chart_ctx, page_id, section):
     assert callable(builder)
     result = builder(chart_ctx, "BE", section)
     assert result is None or isinstance(result, (go.Figure, Html))
+
+
+def test_bars_ordered_by_earliest_horizon():
+    """Largest first in the earliest horizon; the same order for every horizon."""
+    import pandas as pd
+
+    from pypsa2html.charts.base import grouped_bar, order_by_first_horizon, stacked_bar
+
+    df = pd.DataFrame(
+        {"2030": [1.0, 5.0, 0.0, -3.0], "2040": [9.0, 1.0, 2.0, 0.0]},
+        index=["a", "b", "c", "d"],
+    )
+    assert list(order_by_first_horizon(df).index) == ["b", "d", "a", "c"]
+    fig = stacked_bar(df, None, "TWh", signed=False)
+    assert [t.name for t in fig.data] == ["b", "d", "a", "c"]
+    assert list(grouped_bar(df, "%").data[0].x) == ["b", "d", "a", "c"]

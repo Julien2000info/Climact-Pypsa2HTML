@@ -49,12 +49,13 @@ def test_pv_panel_carries_the_three_carriers_separately():
     )
     fig = _faceted_capacity_chart(table, [_SOLAR_PV], unit="GW")
     assert fig is not None
+    # largest first in the earliest horizon (user, 2026-11-10)
     assert [t.name for t in fig.data] == [
-        "Solar PV (rooftop)",
         "Solar PV (ground)",
+        "Solar PV (rooftop)",
         "Solar PV (tracking)",
     ]
-    assert list(fig.data[1].y) == [2.318, 0.0]
+    assert list(fig.data[0].y) == [2.318, 0.0]
     assert list(fig.data[2].y) == [0.0, 1.305]
     # The panel heading stays short: the members are named in the legend.
     assert fig.layout.annotations[0].text == "Solar PV"
@@ -81,6 +82,7 @@ def test_faceted_storage_capacity_panels():
         "Grid-scale battery",
         "Thermal Energy Storage",
         "Gas storage",
+        "Methanol storage",  # its panel is dropped upstream when absent
     }
 
 

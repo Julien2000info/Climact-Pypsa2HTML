@@ -198,10 +198,11 @@ def test_grouped_bar_puts_techs_on_x_and_years_in_the_legend():
     assert fig is not None
     assert fig.layout.barmode == "group"
     assert [t.name for t in fig.data] == ["2030", "2040"]
-    assert list(fig.data[0].x) == ["onshore wind", "nuclear"]
-    assert list(fig.data[0].y) == pytest.approx([25.0, 90.0])
+    # largest first in the earliest horizon (user, 2026-11-10)
+    assert list(fig.data[0].x) == ["nuclear", "onshore wind"]
+    assert list(fig.data[0].y) == pytest.approx([90.0, 25.0])
     # NaN stays a gap rather than becoming a zero bar.
-    assert np.isnan(fig.data[1].y[1])
+    assert np.isnan(fig.data[1].y[0])
 
 
 def test_grouped_bar_drops_all_missing_rows():

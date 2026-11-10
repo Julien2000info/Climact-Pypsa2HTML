@@ -52,6 +52,7 @@ _STORAGE_RENAMES = {
     "battery": "Grid-scale battery",
     "home battery": "Grid-scale battery",
     "gas": "Gas storage",
+    "methanol": "Methanol storage",
 }
 
 #: Energy-flow codes -> (demand group, sector label) for sectoral demands.

@@ -29,6 +29,7 @@ from .base import (
     FONT_SIZE,
     add_chart_data,
     grouped_bar,
+    order_by_first_horizon,
     resolve_tech_color,
     stacked_bar,
     tech_color_map,
@@ -103,6 +104,7 @@ _STORAGE_GROUPS: list[list[str]] = [
     ["Grid-scale battery"],
     ["Thermal Energy Storage"],
     ["Gas storage"],
+    ["Methanol storage"],
 ]
 
 
@@ -289,7 +291,11 @@ def _faceted_capacity_chart(
             col_idx = i + 1 if i < cols else i - cols + 1
         stack_panel = titles[i] in stacked
 
-        for tech in _expand_capacity_group(tech_group, data.index):
+        techs = list(_expand_capacity_group(tech_group, data.index))
+        present = [t for t in techs if t in data.index]
+        ranked = list(order_by_first_horizon(data.loc[present, years]).index) if present else []
+        techs = ranked + [t for t in techs if t not in data.index]
+        for tech in techs:
             if tech in data.index:
                 series = data.loc[tech, years]
             elif fill_missing:
@@ -382,9 +388,12 @@ def storage_capacities_by_tech(ctx, node: str, section) -> go.Figure | None:
         logger.warning("section %s: nothing to plot for node %s", section.id, node)
         return None
     add_chart_data(ctx, node, section.title, section.unit, table.T)
+    # methanol storage only where the run has it (PyPSA-Eur sector runs)
+    groups = [g for g in _STORAGE_GROUPS
+              if g != ["Methanol storage"] or "Methanol storage" in table.index]
     return _faceted_capacity_chart(
         table,
-        _STORAGE_GROUPS,
+        groups,
         unit=section.unit,
         shared_y=False,
         height=500,
@@ -564,9 +573,12 @@ def storage_cycles_by_tech(ctx, node: str, section) -> go.Figure | None:
         logger.warning("section %s: nothing to plot for node %s", section.id, node)
         return None
     add_chart_data(ctx, node, section.title, section.unit, table.T)
+    # methanol storage only where the run has it (PyPSA-Eur sector runs)
+    groups = [g for g in _STORAGE_GROUPS
+              if g != ["Methanol storage"] or "Methanol storage" in table.index]
     return _faceted_capacity_chart(
         table,
-        _STORAGE_GROUPS,
+        groups,
         unit=section.unit,
         scale=1.0,
         shared_y=False,

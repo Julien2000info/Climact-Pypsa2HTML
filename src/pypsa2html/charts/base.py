@@ -499,6 +499,20 @@ def line_chart(
     return fig
 
 
+def order_by_first_horizon(data: pd.DataFrame) -> pd.DataFrame:
+    """Rows of a category x horizon table, largest first by absolute value in the
+    earliest horizon; ties (e.g. zero in the first horizon) by the next horizons.
+
+    One order for every horizon, so bars of different horizons set side by side
+    keep their categories in the same place (user, 2026-11-10).
+    """
+    if data is None or data.empty or not len(data.columns):
+        return data
+    key = data.astype(float).abs().fillna(0.0)
+    order = sorted(range(len(key)), key=lambda i: tuple(-v for v in key.iloc[i].values))
+    return data.iloc[order]
+
+
 def stacked_bar(
     df: pd.DataFrame,
     colors: dict[str, str] | None,
@@ -527,6 +541,8 @@ def stacked_bar(
     data = data.loc[~(data == 0).all(axis=1)]
     if data.empty:
         return None
+    # largest first (bottom of the stack, top of the legend), earliest horizon's order
+    data = order_by_first_horizon(data)
     years = [str(c) for c in data.columns]
     transposed = data.T
     transposed.index = years
@@ -578,6 +594,8 @@ def stacked_bar(
         legend_title_text="",
         margin={"l": 60, "r": 30, "t": 60 if title else 30, "b": 50},
         xaxis={"tickmode": "array", "tickvals": years, "title": ""},
+        # legend top-down = stack top-down (largest at the bottom of both)
+        legend={"traceorder": "reversed"},
     )
     return fig
 
@@ -620,6 +638,7 @@ def grouped_bar(
     data = data.loc[data.notna().any(axis=1)]
     if data.empty:
         return None
+    data = order_by_first_horizon(data)
     techs = [str(i) for i in data.index]
     years = [str(c) for c in data.columns]
     fig = go.Figure()
