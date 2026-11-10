@@ -58,6 +58,14 @@ pages:
       - {id: secondary_mix,          title: Mix of secondary energies,                       builder: indicators.secondary_mix,        unit: TWh/year,   enabled: false}
       - {id: fec_by_carrier,         title: Final energy consumption by carrier per sector,  builder: indicators.fec_by_carrier,       unit: TWh/year}
 
+  # Supply regions of PyPSA-Eur-CANEU's import caps (the PatEx "EU" region and each
+  # modelled country outside it); same content on every node, empty without the caps.
+  - id: supply
+    title: Imports and self-sufficiency
+    sections:
+      - {id: supply_self_sufficiency, title: Self-sufficiency per supply region,       builder: supply_limits.self_sufficiency_regions, unit: '%'}
+      - {id: supply_imports,          title: Imports per energy vector and import caps, builder: supply_limits.imports_by_vector,        unit: TWh/year}
+
   - id: demands
     title: Demands
     sections:
