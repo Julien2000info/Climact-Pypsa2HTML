@@ -126,6 +126,20 @@ def test_oil_node_conserves_carbon():
     assert b["naphtha carbon in products"] == pytest.approx(25 * (MODEL_OIL - 0.0122))
 
 
+def test_waste_chp_carbon_comes_from_the_naphtha_node():
+    """PyPSA-Eur-CANEU ``patex.waste_to_energy``: 2 TWh of waste burned at 0.357 t/MWh."""
+    n = _network()
+    n.add("Link", "A waste CHP", bus0="A HVC", bus1="A", bus2="", bus3="co2 atmosphere",
+          carrier="waste CHP", efficiency=0.2, efficiency3=0.357)
+    for port, value in {"p0": 2.0, "p1": -0.4, "p2": 0.0, "p3": -2 * 0.357}.items():
+        getattr(n.links_t, port)["A waste CHP"] = value
+    b = _balance_for_horizon(_ctx(n), "ALL", 2050).set_index("entry")["value"]
+    assert b["naphtha carbon to waste CHP"] == pytest.approx(2 * 0.357)
+    assert b["Waste CHP emissions"] == pytest.approx(2 * 0.357)
+    assert b["naphtha carbon in products"] == pytest.approx(
+        25 * (MODEL_OIL - 0.0122) - 2 * 0.357)
+
+
 RUN = Path(__file__).resolve().parents[2] / "PyPSA-Eur-CANEU"
 RUN_NAME = "patex-levers2-nwe-bz-co2-cap-50-24h"
 

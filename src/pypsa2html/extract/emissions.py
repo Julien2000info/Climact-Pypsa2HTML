@@ -733,9 +733,15 @@ def _balance_for_horizon(ctx: BuildContext, node: str, horizon: int) -> pd.DataF
             "gas", "CO2 intensity", default=_DEFAULT_INTENSITY[("gas", "CO2 intensity")])
     extras.append(("gas feedstock carbon", "gas feedstock carbon", "gas", "products",
                    feedstock))
+    # Waste burned in waste CHPs (PyPSA-Eur-CANEU ``patex.waste_to_energy``: PatEx's
+    # non-renewable waste-to-energy): its carbon comes from the naphtha node.
+    # "Waste CHP emissions" matches by prefix, so it holds port 3 of waste CHP CC too.
+    waste = value("Waste CHP emissions") + value("Waste CHP CC")
+    extras.append(("naphtha carbon to waste CHP", "naphtha carbon to waste CHP", "naphtha",
+                   "Waste CHP", waste))
     extras.append((
         "naphtha carbon in products", "naphtha carbon in products", "naphtha", "products",
-        value("naphtha carbon") - value("naphtha for industry") - value("HVC to air"),
+        value("naphtha carbon") - value("naphtha for industry") - value("HVC to air") - waste,
     ))
 
     lulucf = _lulucf(ctx, node, horizon)
