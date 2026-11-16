@@ -187,6 +187,7 @@ unsustainable bioliquids,bioliquids to oil products,TWh,probioliq
 PHS,Pumped-hydro storage losses,TWh,lossphs
 rail electricity,electricity demand for rail network,TWh,preserail
 aviation electricity,aviation electricity demand,TWh,preselccfavi
+electricity cooling,electricity demand of residential and tertairy (cooling),TWh,preselccfres
 shipping electricity,shipping electricity demand,TWh,preselccfwati
 H2 for rail,hydrogen demand for rail network,TWh,preshydras
 land transport gas,land transport gas demand,TWh,presgazcftra
