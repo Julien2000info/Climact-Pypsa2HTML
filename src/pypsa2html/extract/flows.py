@@ -68,6 +68,10 @@ logger = logging.getLogger(__name__)
 #: PyPSA works in MWh, the report in TWh.
 MWH_PER_TWH = 1.0e6
 
+#: Links that carry a carrier between nodes; their trade is measured at the border.
+_TRANSMISSION_LINKS = ("DC", "H2 pipeline", "H2 pipeline retrofitted", "H2 pipeline (Kernnetz)",
+                       "gas pipeline", "gas pipeline new", "CO2 pipeline")
+
 #: Pseudo bus carrier for the residual of a link's energy balance.
 LOSSES = "losses"
 
@@ -227,6 +231,14 @@ def _link_flows(
         for port in ports
         if f"bus{port}" in links.columns
     }
+    # Carbon-neutral imports (PyPSA-Eur-CANEU ``import biogas``, ``import bioliquids``,
+    # ``import gas`` ...) take their CO2 from the atmosphere at port 0 and deliver the
+    # fuel at port 1: their energy row would start on a CO2 bus and be dropped as
+    # bookkeeping (NWE run 2040: 183 TWh of imported biomethane into DE vanished,
+    # hidden by the fossil-gas remainder). The link itself is the source.
+    if 0 in bus_carrier:
+        imported = (bus_carrier[0] == _CO2) & links["carrier"].str.startswith("import ")
+        bus_carrier[0] = bus_carrier[0].where(~imported, links["carrier"])
     if totals is None:
         weights = network.snapshot_weightings.generators
         total = {port: _port_total(network, weights, port, index) for port in ports}
@@ -790,6 +802,16 @@ def _flows_for_horizon(ctx: BuildContext, node: str, horizon: int) -> pd.Series:
     totals = _link_port_totals(ctx, horizon)
 
     links = _select(ctx, network, node, "links", horizon)
+    # Transmission links crossing the node's border: their trade is read at each end
+    # (sent at port 0, received at port 1, see indicators._measured_electricity_trade),
+    # so their losses fall outside the node. Only links with both ends inside count
+    # (Mallorca 2030: 0.7 TWh of HVDC losses were booked twice, 2026-11-18).
+    locations = ctx.locations_for(node) if hasattr(ctx, "locations_for") else None
+    if locations is not None:
+        static = network.links.loc[links]
+        border = static["carrier"].isin(_TRANSMISSION_LINKS) & ~static["bus1"].map(
+            network.buses["location"]).isin(locations)
+        links = links[~border.to_numpy()]
     flows = _link_flows(network, links, totals=totals)
     flows = _heat_pump_rows(network, links, flows, totals=totals)
     flows = _orient(flows)
@@ -829,7 +851,7 @@ def _flows_for_horizon(ctx: BuildContext, node: str, horizon: int) -> pd.Series:
     everything = pd.concat([part for part in parts if len(part)], ignore_index=True)
     # The two fossil commodities are renamed so that the generator row does not
     # collapse onto `source == target`.
-    fossil = {"gas": "fossil gas", "oil": "fossil oil"}
+    fossil = {"gas": "fossil gas", "oil": "fossil oil", "oil primary": "crude oil"}
     generator = everything["origin"] == "generator"
     for column in ("carrier", "source"):
         everything.loc[generator, column] = everything.loc[generator, column].replace(fossil)

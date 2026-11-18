@@ -253,6 +253,7 @@ IMPORT_FLOWS: tuple[tuple[str, str, str], ...] = (
     ("imp", "oth_pe", ""),
     # a country's draw on the EU-wide pools (EU_POOL_CARRIERS)
     ("eupi", "pet_fe", ""),
+    ("eupi", "pet_pe", ""),
     ("eupi", "met_fe", ""),
     ("eupi", "cms_pe", ""),
     ("eupi", "ura_pe", ""),
@@ -898,6 +899,67 @@ def year_weights(ctx, years: Sequence[int]) -> pd.Series:
 EU_POOL_CARRIERS: tuple[str, ...] = ("pet", "met", "cms", "ura")
 
 
+#: Pipelines whose cross-border flows are the node's trade in that carrier.
+GAS_PIPELINES: tuple[str, ...] = ("gas pipeline", "gas pipeline new")
+H2_PIPELINES: tuple[str, ...] = ("H2 pipeline", "H2 pipeline retrofitted", "H2 pipeline (Kernnetz)")
+
+
+def _has_networks(ctx) -> bool:
+    return bool(getattr(ctx, "networks", None))
+
+
+def _measured_link_trade(ctx, node: str, years, carriers: Sequence[str]):
+    """(imports, exports) of ``node`` over the border links of ``carriers``, TWh/year,
+    read on the model: per snapshot, the node's net outflow over the links with one end
+    inside (port 0 flow), split into its positive (export) and negative (import) parts.
+    ``None`` without networks; zero for the study-wide aggregate."""
+    if not _has_networks(ctx):
+        return None
+    locations = (
+        ctx.locations_for(node)
+        if hasattr(ctx, "locations_for")
+        else (None if ctx.is_aggregate(node) else [node])
+    )
+    imports, exports = _zeros(years), _zeros(years)
+    if locations is None:
+        return imports, exports
+    for year in years:
+        try:
+            n = ctx.networks[int(year)]
+        except Exception:  # noqa: BLE001 - a missing horizon is not fatal
+            continue
+        links = n.links[n.links["carrier"].isin(carriers)]
+        if links.empty or "p0" not in n.links_t:
+            continue
+        location = n.buses["location"]
+        in0 = links["bus0"].map(location).isin(locations)
+        in1 = links["bus1"].map(location).isin(locations)
+        p0 = n.links_t.p0
+        outflow = (p0.reindex(columns=links.index[in0 & ~in1]).fillna(0.0).sum(axis=1)
+                   - p0.reindex(columns=links.index[~in0 & in1]).fillna(0.0).sum(axis=1))
+        weights = n.snapshot_weightings.generators
+        exports.loc[year] = float((outflow.clip(lower=0.0) * weights).sum()) / 1e6
+        imports.loc[year] = float(((-outflow).clip(lower=0.0) * weights).sum()) / 1e6
+    return imports, exports
+
+
+def _gas_intensity(ctx, years) -> pd.Series:
+    """Carbon content of gas as the network burns it [tCO2/MWh = MtCO2/TWh]."""
+    from .extract.emissions import _DEFAULT_INTENSITY, network_fuel_intensity
+
+    default = ctx.cost("gas", "CO2 intensity",
+                       default=_DEFAULT_INTENSITY[("gas", "CO2 intensity")])
+    out = pd.Series(default, index=years, dtype=float)
+    for year in years:
+        try:
+            value = network_fuel_intensity(ctx, ctx.networks[int(year)], int(year), "gas")
+        except Exception:  # noqa: BLE001
+            value = None
+        if value is not None:
+            out.loc[year] = value
+    return out
+
+
 def _measured_generation(ctx, node: str, years, carriers: Sequence[str]) -> pd.Series | None:
     """Annual output (TWh) of the node's generators of ``carriers``, read on the model;
     ``None`` without networks."""
@@ -1036,7 +1098,10 @@ def _close_energy_graph(ctx, node: str, flows: pd.DataFrame) -> pd.DataFrame:
     # (e.g. electrobiofuels) exports the surplus instead of a negative fossil
     # flow. The original wrote ``fischer - biomass_liquid - demand`` there.
     if aggregate:
-        flows[("pet_pe", "pet_fe", "")] = (demand - synthetic).clip(lower=0)
+        # The refineries' output is read on the model (entry "oil refining"); the
+        # remainder only for networks without a refinery link.
+        if not (_has_networks(ctx) and column(flows, ("pet_pe", "pet_fe", "")).abs().sum() > 0):
+            flows[("pet_pe", "pet_fe", "")] = (demand - synthetic).clip(lower=0)
     else:
         # A country draws oil products from the EU pool: local liquid-fuel production
         # serves local use first; the shortfall comes from the pool, the surplus goes
@@ -1075,11 +1140,22 @@ def _close_energy_graph(ctx, node: str, flows: pd.DataFrame) -> pd.DataFrame:
     renewable_gas = sum(
         (column(flows, key).clip(lower=0) for key in GAS_GRID_RENEWABLE), _zeros(years)
     )
-    flows[("gaz_pe", "gaz_se", "")] = se_consumption.get("gaz_se", _zeros(years)) - renewable_gas
+    if _has_networks(ctx):
+        # the node's gas supply generators, read on the model: natural gas from
+        # outside the region (entry "fossil gas") and domestic production
+        flows[("gaz_pe", "gaz_se", "")] = (
+            column(flows, ("imp", "gaz_pe", ""))
+            + column(flows, ("prod", "gaz_pe", "mod"))
+        )
+    else:
+        flows[("gaz_pe", "gaz_se", "")] = (
+            se_consumption.get("gaz_se", _zeros(years)) - renewable_gas)
 
     # -- 5. nuclear thermal losses from the reactor efficiency -------------
     efficiency = ctx.cost("nuclear", "efficiency", default=float("nan"))
-    if efficiency and np.isfinite(efficiency) and efficiency > 0:
+    if column(flows, ("ura_pe", "per", "thm")).abs().sum() > 0:
+        pass  # the reactor links' own losses (entry "nuclear_2"), read on the model
+    elif efficiency and np.isfinite(efficiency) and efficiency > 0:
         flows[("ura_pe", "per", "thm")] = column(flows, ("ura_pe", "elc_se", "thm")) * (
             (1 - efficiency) / efficiency
         )
@@ -1107,14 +1183,21 @@ def _close_energy_graph(ctx, node: str, flows: pd.DataFrame) -> pd.DataFrame:
     def modelled(carrier):
         return column(flows, ("prod", f"{carrier}_pe", "mod"))
 
+    if not aggregate and _has_networks(ctx):
+        # oil burnt straight from the EU oil bus (oil power plants) comes from the pool
+        flows[("eupi", "pet_pe", "")] = pe_supply.get("pet_pe", _zeros(years))
     for carrier in IMPORTED_CARRIERS:
         used = pe_supply.get(f"{carrier}_pe", _zeros(years))
         source = "eupi" if (carrier in EU_POOL_CARRIERS and not aggregate) else "imp"
         flows[(source, f"{carrier}_pe", "")] = (used - modelled(carrier)).clip(lower=0)
 
     for carrier, table, what in (
-        ("gaz", ctx.taxonomy.domestic_gas, "domestic gas production"),
-        ("pet", ctx.taxonomy.domestic_oil, "domestic oil production"),
+        ()  # the model's own supply generators say what is domestic and imported
+        if _has_networks(ctx)
+        else (
+            ("gaz", ctx.taxonomy.domestic_gas, "domestic gas production"),
+            ("pet", ctx.taxonomy.domestic_oil, "domestic oil production"),
+        )
     ):
         used = (pe_supply.get(f"{carrier}_pe", _zeros(years)) - modelled(carrier)).clip(lower=0)
         local = _domestic_production(ctx, node, table, years, what)
@@ -1153,10 +1236,18 @@ def _close_energy_graph(ctx, node: str, flows: pd.DataFrame) -> pd.DataFrame:
         # remaining gap is now left visible for `graph_imbalances` to report,
         # which is the point of that check. D20.
         measured = _measured_electricity_trade(ctx, node, years)
+        # Hydrogen and gas: their pipelines' cross-border flows, read on the model.
+        pipelines = {"hyd_se": _measured_link_trade(ctx, node, years, H2_PIPELINES)}
+        gas = _measured_link_trade(ctx, node, years, GAS_PIPELINES)
+        if gas is not None:
+            flows[("imp", "gaz_se", "")], flows[("gaz_se", "exp", "")] = gas
         for carrier in TRADED_SE_CARRIERS:
             code = f"{carrier}_se"
             if code == "elc_se" and measured is not None:
                 flows[("imp", code, "")], flows[(code, "exp", "")] = measured
+                continue
+            if pipelines.get(code) is not None:
+                flows[("imp", code, "")], flows[(code, "exp", "")] = pipelines[code]
                 continue
             balance = consumed.get(code, _zeros(years)) - produced.get(code, _zeros(years))
             flows[("imp", code, "")] = balance.clip(lower=0)
@@ -1175,6 +1266,12 @@ def _close_energy_graph(ctx, node: str, flows: pd.DataFrame) -> pd.DataFrame:
         supply = produced.get(code, _zeros(years))
         demand = consumed.get(code, _zeros(years))
         into, out_of = ("eupi", "eupe") if carrier in EU_POOL_CARRIERS else ("imp", "exp")
+        if carrier not in EU_POOL_CARRIERS and _has_networks(ctx):
+            # no transport links in the model (ammonia): no trade between nodes;
+            # its imports are the model's import generators (type ``mod``)
+            flows[(into, code, "")] = _zeros(years)
+            flows[(code, out_of, "")] = _zeros(years)
+            continue
         flows[(into, code, "")] = (demand - supply - electricity).clip(lower=0)
         flows[(code, out_of, "")] = (supply - demand - electricity).clip(lower=0)
 
@@ -1256,6 +1353,16 @@ def _close_carbon_graph(
                 flows_co2[(fossil_node, fuel_node, "")] = _zeros(years)
                 flows_co2[("eupi_ghg", "oil_ghg", "")] = net.clip(lower=0.0)
                 flows_co2[("oil_ghg", "eupe_ghg", "")] = (-net).clip(lower=0.0)
+            elif _has_networks(ctx):
+                # gas: the node's own supply generators and its pipeline trade, read
+                # on the model (energy graph) at the carbon content the network burns
+                intensity = _gas_intensity(ctx, years)
+                flows_co2[(fossil_node, fuel_node, "")] = (
+                    column(flows, ("gaz_pe", "gaz_se", "")) * intensity)
+                flows_co2[("gimp_ghg", "gas_ghg", "")] = (
+                    column(flows, ("imp", "gaz_se", "")) * intensity)
+                flows_co2[("gas_ghg", "gexp_ghg", "")] = (
+                    column(flows, ("gaz_se", "exp", "")) * intensity)
             else:
                 flows_co2[(fossil_node, fuel_node, "")] = net
 

@@ -8,6 +8,7 @@ offwind-dc,Offshore wind-generated electricity,TWh,proeofdc
 hydro,Total hydropower production,TWh,prohdr
 ror,Total ror production,TWh,prohdror
 nuclear,Nuclear production,TWh,proelcnuc
+nuclear_2,Transformation losses (nuclear powerplants),TWh,lossnuc
 coal,Coal-fired power generation,TWh,proelccms
 lignite,lignite power generation,TWh,proelign
 CCGT,Gas-fired power generation,TWh,proelcgaz
@@ -104,6 +105,9 @@ battery charger,battery charger,TWh,probattchg
 battery charger_2,battery charger losses,TWh,probattchlos
 H2 pipeline_2,electricity to H2 compression,TWh,preelchhydcomp
 fossil oil,fossil oil,TWh,prefossiloil
+fossil gas,Natural gas supply (imports from outside the region),TWh,procimpgas
+crude oil,Crude oil supply (imports from outside the region),TWh,procimpoil
+oil refining,Refined oil products,TWh,prefossiloil
 battery discharger,battery discharger,TWh,probattdhg
 battery discharger_2,battery discharger losses,TWh,probattdhlos
 H2 turbine,hydrogen turbine,TWh,proelchyd

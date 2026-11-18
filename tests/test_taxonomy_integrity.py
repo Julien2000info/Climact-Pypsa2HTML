@@ -64,7 +64,10 @@ def test_carbon_sankey_dead_edges_do_not_increase(tax, producible_codes):
     """
     referenced = set(tax.processes_carbon["Value_Code"].dropna())
     dead = sorted(referenced - producible_codes)
-    assert len(dead) <= 17, f"new dead carbon Sankey edge(s): {dead}"
+    # 19: +2 gas imported / exported by pipeline (`emmgasimp`, `emmgasexp`), like the
+    # EU-pool edges computed in the carbon closure, not by a carrier mapping
+    # (2026-11-18).
+    assert len(dead) <= 19, f"new dead carbon Sankey edge(s): {dead}"
 
 
 def test_codes_added_by_the_pypsa_wal_fork_are_producible(tax, producible_codes):
@@ -135,7 +138,9 @@ def test_energy_sankey_unresolved_edges_do_not_increase(tax, produced_codes):
     # electricity `prelcgic`, `prelcbic`, `prelcpcc`; biomass CC losses).
     # 247: +2 condensation heat gains of biomass CHPs and gas boilers (`lhvbchp`,
     # `lhvgas`: outputs above the fuel's LHV).
-    assert len(referenced - produced_codes) <= 247
+    # 249: +2 gas imported by pipeline (`procimpgaspipe`, measured) and oil from
+    # the EU pool burnt in power plants (`proeupoilpe`).
+    assert len(referenced - produced_codes) <= 249
 
 
 def test_value_codes_reused_across_edges_are_known(tax):
