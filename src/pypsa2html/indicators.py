@@ -1156,14 +1156,15 @@ def _close_carbon_graph(
     if capped_emissions_enabled(ctx):
         flows_co2[("atm", "net_ghg", "net")] = _zeros(years)
     else:
-        flows_co2[("atm", "net_ghg", "net")] = (
-            inflows.get("atm", _zeros(years))
-            - inflows.get("bm_ghg", _zeros(years))
-            - inflows.get("luf_ghg", _zeros(years))
-            - column(flows_co2, ("atm", "stm", ""))
-            - column(flows_co2, ("atm", "blg_ghg", ""))
-            - column(flows_co2, ("atm", "blg_ghg", "cc"))
-        )
+        # Everything the atmosphere receives minus everything taken out of it:
+        # biogenic and land-use sinks, DAC, biogas, and the uptake abroad of
+        # carbon-neutral imports (atm -> gas / oil "bimp", "simp"), which the
+        # previous list of edges missed (NWE reference 2040: 503.6 instead of
+        # 246.4 Mt, 2026-11-18).
+        net_nodes = ("net_ghg", "netcap_ghg", "netoth_ghg")
+        uptakes = [c for c in flows_co2.columns if c[0] == "atm" and c[1] not in net_nodes]
+        flows_co2[("atm", "net_ghg", "net")] = inflows.get("atm", _zeros(years)) - sum(
+            (flows_co2[c] for c in uptakes), _zeros(years))
 
     # -- methanol trade carries its embodied CO2: a country's methanol node
     # sits on the EU-wide methanol bus, so what it burns beyond what it makes

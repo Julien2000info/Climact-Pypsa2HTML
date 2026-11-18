@@ -158,12 +158,21 @@ def test_waste_chp_capture_residual_is_booked_once():
 
 
 RUN = Path(__file__).resolve().parents[2] / "PyPSA-Eur-CANEU"
-RUN_NAME = "patex-levers2-nwe-bz-co2-cap-50-24h"
+# Validated PyPSA-Eur-CANEU runs (the cap-50 run was deleted 2026-11-18): the NW Europe
+# reference (audit #1-#7, 2023 weather) and the EU28 run (bio self-sufficient, biogas
+# upgrading and renewable waste capture). Each test skips a run that is not on disk.
+RUN_NAMES = (
+    "patex-levers2-nwe-bz-co2-90-2040-24h-2023-shift",
+    "patex-levers2-eu28-bz-co2-80-2040-24h-2023-shift-bio",
+)
+_on_disk = pytest.mark.parametrize("RUN_NAME", [
+    pytest.param(r, marks=pytest.mark.skipif(not (RUN / "results" / r / "networks").exists(),
+                                             reason=f"run {r} not on disk"))
+    for r in RUN_NAMES])
 
 
-@pytest.mark.skipif(not (RUN / "results" / RUN_NAME / "networks").exists(),
-                    reason="PyPSA-Eur-CANEU NW Europe run not on disk")
-def test_carbon_sankey_transformation_nodes_balance_on_the_nwe_run(tmp_path):
+@_on_disk
+def test_carbon_sankey_transformation_nodes_balance_on_the_nwe_run(tmp_path, RUN_NAME):
     """Carbon transformation nodes conserve carbon: study-wide (measured fossil
     inflows) and per country (EU and non-EU)."""
     import yaml
@@ -193,9 +202,8 @@ def test_carbon_sankey_transformation_nodes_balance_on_the_nwe_run(tmp_path):
         assert imb.empty, (node, imb.to_dict("records"))
 
 
-@pytest.mark.skipif(not (RUN / "results" / RUN_NAME / "networks").exists(),
-                    reason="PyPSA-Eur-CANEU NW Europe run not on disk")
-def test_reported_emissions_equal_the_models_atmosphere(tmp_path):
+@_on_disk
+def test_reported_emissions_equal_the_models_atmosphere(tmp_path, RUN_NAME):
     """The emissions-by-sector total and the carbon Sankey's net equal the CO2 the
     model leaves in the atmosphere (2026-11-10: carbon-neutral import uptakes and
     discovered atmosphere ports were missing, a coal supply generator was counted
