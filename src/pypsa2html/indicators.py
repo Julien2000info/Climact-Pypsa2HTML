@@ -152,6 +152,8 @@ TRADED_SE_CARRIERS: tuple[str, ...] = ("elc", "hyd")
 #: industrial processes) and sinks (net emissions, sequestration, products) are not.
 CARBON_BALANCE_NODES: tuple[str, ...] = (
     "oil_ghg", "gas_ghg", "met_ghg", "hvc_ghg", "pro_ghg", "wst_ghg",
+    # captured CO2: sequestration and pipeline trade are measured, not closed
+    "stm",
 )
 
 BALANCE_NODE_TYPES: tuple[str, ...] = (

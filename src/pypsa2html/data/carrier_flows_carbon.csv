@@ -55,6 +55,8 @@ renewable waste CHP CC,renewable waste CHP CC,MtCO2,emmrwstcc
 renewable waste CHP CC_2,renewable waste CHP CC,MtCO2,emmrwstccstm
 DAC,DAC,MtCO2,emmdac
 co2 sequestration,co2 sequestration,MtCO2,emmseq
+CO2 pipeline export,CO2 pipeline export,MtCO2,emmco2exp
+CO2 pipeline import,CO2 pipeline import,MtCO2,emmco2imp
 Electrobiofuels,Electrobiofuels,MtCO2,emmefuel
 Electrobiofuels_2,Electrobiofuels emissions,MtCO2,emmefuelemm
 solid biomass solid biomass to gas,solid biomass solid biomass to gas,MtCO2,emmbmsng

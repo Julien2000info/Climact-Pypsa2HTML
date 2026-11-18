@@ -140,6 +140,35 @@ def test_waste_chp_carbon_comes_from_the_naphtha_node():
         25 * (MODEL_OIL - 0.0122) - 2 * 0.357)
 
 
+def test_co2_sequestration_and_pipeline_trade_are_read_on_the_links():
+    """Node A captures 3 Mt (process emissions CC), sends 2 Mt to B by pipeline and
+    sequesters 1 Mt: sequestration is the sequestration link, not A's residual."""
+    from pypsa2html.extract.emissions import _co2_pipeline_trade, _co2_sequestered, _Reductions
+
+    n = _network()
+    n.add("Carrier", ["co2 sequestered"])
+    n.add("Bus", "B co2 stored", carrier="co2 stored", location="B")
+    n.add("Bus", "A co2 sequestered", carrier="co2 sequestered", location="A")
+    n.add("Link", "A capture", bus0="A process emissions", bus1="A co2 stored",
+          carrier="process emissions CC")
+    n.add("Link", "A co2 sequestered", bus0="A co2 stored", bus1="A co2 sequestered",
+          carrier="co2 sequestered")
+    n.add("Link", "CO2 pipeline A -> B", bus0="A co2 stored", bus1="B co2 stored",
+          carrier="CO2 pipeline", p_min_pu=-1)
+    for port, value in {"p0": {"A capture": 3.0, "A co2 sequestered": 1.0,
+                               "CO2 pipeline A -> B": 2.0},
+                        "p1": {"A capture": -3.0, "A co2 sequestered": -1.0,
+                               "CO2 pipeline A -> B": -2.0}}.items():
+        for link, v in value.items():
+            getattr(n.links_t, port)[link] = v
+    ctx = _ctx(n)
+    ctx.locations_for = lambda node: {"A": ["A"], "B": ["B"]}.get(node)
+    assert _co2_sequestered(ctx, _Reductions(ctx, "A", 2050)) == pytest.approx(1.0)
+    assert _co2_pipeline_trade(ctx, "A", 2050) == pytest.approx((2.0, 0.0))
+    assert _co2_pipeline_trade(ctx, "B", 2050) == pytest.approx((0.0, 2.0))
+    assert _co2_pipeline_trade(ctx, "ALL", 2050) == (0.0, 0.0)
+
+
 def test_waste_chp_capture_residual_is_booked_once():
     """``waste CHP CC``: the residual (port 3) and the stored part (port 4) add up to the
     naphtha carbon burned; the residual is not also counted as plain-plant emissions."""

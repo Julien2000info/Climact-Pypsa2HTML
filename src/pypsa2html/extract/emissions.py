@@ -701,6 +701,45 @@ def capped_emissions(ctx: BuildContext, node: str, horizon: int) -> float | None
 
 
 # --------------------------------------------------------------------------
+def _co2_sequestered(ctx: BuildContext, reductions: "_Reductions") -> float | None:
+    """CO2 sent to geological storage by the node, read on the model's
+    ``co2 sequestered`` links (port 0, MtCO2); ``None`` if the network has none."""
+    network = reductions.network
+    if not (network.links["carrier"] == "co2 sequestered").any():
+        return None
+    flow = CarbonFlow("co2 sequestration", STORED, "co2 sequestration",
+                      ("co2 sequestered",), 0, sign=1.0)
+    return reductions.total(flow)
+
+
+def _co2_pipeline_trade(ctx: BuildContext, node: str, horizon: int) -> tuple[float, float]:
+    """(exported, imported) CO2 of ``node`` through ``CO2 pipeline`` links, MtCO2.
+
+    Read on the links that cross the node's border: per snapshot, the node's net
+    outflow over all of them; exports are its positive part, imports its negative
+    part, weighted by the snapshot weightings. Zero for the study-wide aggregate.
+    """
+    locations = ctx.locations_for(node) if hasattr(ctx, "locations_for") else None
+    if locations is None:
+        return 0.0, 0.0
+    network = ctx.networks[horizon]
+    links = network.links[network.links["carrier"] == "CO2 pipeline"]
+    if links.empty or "p0" not in network.links_t:
+        return 0.0, 0.0
+    location = network.buses["location"]
+    inside0 = links["bus0"].map(location).isin(locations)
+    inside1 = links["bus1"].map(location).isin(locations)
+    out_links = links.index[inside0 & ~inside1]   # p0 > 0: leaves the node
+    in_links = links.index[~inside0 & inside1]    # p0 > 0: enters the node
+    p0 = network.links_t.p0
+    outflow = (p0.reindex(columns=out_links).fillna(0.0).sum(axis=1)
+               - p0.reindex(columns=in_links).fillna(0.0).sum(axis=1))
+    weights = network.snapshot_weightings.generators
+    exported = float((outflow.clip(lower=0.0) * weights).sum()) / 1e6
+    imported = float(((-outflow).clip(lower=0.0) * weights).sum()) / 1e6
+    return exported, imported
+
+
 def _balance_for_horizon(ctx: BuildContext, node: str, horizon: int) -> pd.DataFrame:
     """The full carbon balance for one node and horizon, in MtCO2."""
     reductions = _Reductions(ctx, node, horizon)
@@ -721,10 +760,18 @@ def _balance_for_horizon(ctx: BuildContext, node: str, horizon: int) -> pd.DataF
         out = balance.loc[balance["source"] == bus, "value"].sum()
         return float(into - out)
 
-    # Order matters: sequestration is a balance over the rows above it, the net
-    # emission is a balance over everything including the exogenous rows.
+    # Sequestration and CO2 pipeline trade are read on the model's links (2026-11-18:
+    # sequestration was the residual of the stored node, so a country's pipeline
+    # exports showed as sequestered in it). Networks without sequestration links
+    # keep the old residual.
+    sequestered = _co2_sequestered(ctx, reductions)
+    exported, imported = _co2_pipeline_trade(ctx, node, horizon)
+    if sequestered is None:
+        sequestered = _net(STORED) - exported + imported
     extras: list[tuple] = [
-        ("co2 sequestration", "co2 sequestration", STORED, "co2 sequestration", _net(STORED))
+        ("co2 sequestration", "co2 sequestration", STORED, "co2 sequestration", sequestered),
+        ("CO2 pipeline export", "CO2 pipeline export", STORED, "co2 export", exported),
+        ("CO2 pipeline import", "CO2 pipeline import", "co2 import", STORED, imported),
     ]
     # Naphtha carbon not emitted this year: kept in plastics and other products
     # (PatEx / inventory convention, PyPSA-Eur-CANEU ``patex.plastics_eol_co2:
