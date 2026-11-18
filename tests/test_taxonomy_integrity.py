@@ -140,7 +140,8 @@ def test_energy_sankey_unresolved_edges_do_not_increase(tax, produced_codes):
     # `lhvgas`: outputs above the fuel's LHV).
     # 249: +2 gas imported by pipeline (`procimpgaspipe`, measured) and oil from
     # the EU pool burnt in power plants (`proeupoilpe`).
-    assert len(referenced - produced_codes) <= 249
+    # 250: +1 decentral solar thermal primary to final (`pressthpefe`).
+    assert len(referenced - produced_codes) <= 250
 
 
 def test_value_codes_reused_across_edges_are_known(tax):

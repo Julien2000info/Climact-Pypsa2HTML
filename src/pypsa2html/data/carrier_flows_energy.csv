@@ -177,6 +177,8 @@ waste CHP_3,waste CHP losses,TWh,dz
 waste CHP CC_3,waste CHP CC losses,TWh,dzzz
 renewable waste CHP,renewable waste CHP,TWh,prbelcchpwstren
 urban central solar thermal,urban central solar thermal,TWh,prbrchsth
+rural solar thermal,rural solar thermal,TWh,pressthcfres
+urban decentral solar thermal,urban decentral solar thermal,TWh,pressthcfres
 renewable waste CHP CC,renewable waste CHP CC,TWh,prbelcchpwstren
 renewable waste CHP_2,renewable waste CHP to heat,TWh,prbvapchpwstren
 renewable waste CHP CC_2,renewable waste CHP CC to heat,TWh,prbvapchpwstren

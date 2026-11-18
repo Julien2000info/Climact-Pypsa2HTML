@@ -913,3 +913,75 @@ group.
 (`dh_year`, `dh_storage`, `dh_by_price`, `dh_electric_heat`); `plots:` switches any
 of them off and nothing else reads their modules.
 
+
+## D26 — Sankey flows are read on the model; remainders only as a fallback
+
+*2026-11-18, CAN-CLIMACT branch, on PyPSA-Eur-CANEU runs (EU28 and NW Europe).*
+
+**Problem.** Many Sankey edges were the remainder that closes a node (fossil gas =
+gas used − renewable gas; a country's fossil oil = oil used − synthetic; CO2
+sequestration = captured − used; H2 trade = consumption − production; domestic gas,
+oil and solid biomass from external tables). A remainder closes the node whatever the
+mapping misses, so errors stayed invisible. Reviewing the EU28 report (J. Jacquemin)
+showed what they hid: Belgium's 27 Mt of CO2 exported by pipeline drawn as
+sequestered; 183 TWh of imported biomethane into Germany dropped (NWE run); capture
+electricity unmapped; biomass CHP and condensing boiler gains booked as double
+losses (DE 2030: 11 TWh); HVDC losses of Mallorca and Shetland counted twice;
+low-temperature industry heat of SE01 drawn as district heat with no supply.
+
+**Decided.** Every flow the network has is read on the network (link ports, generator
+and load outputs, snapshot-weighted). With networks loaded, the remainders are not used;
+they stay only for contexts without networks (unit tests, négaWatt reference). The
+balance check (`graph_imbalances`) then shows what is missing.
+
+| Flow | Read on |
+|---|---|
+| CO2 sequestration | port 0 of the `co2 sequestered` links |
+| CO2, gas, H2 trade between nodes | per-snapshot net flow on the border `CO2 pipeline`, `gas pipeline(s)`, `H2 pipeline(s)` (exports = positive part, imports = negative part) |
+| Electricity trade | lines and DC links at each end (D20); border-link losses fall outside the node |
+| Gas supply of a node | its `gas` generators (natural gas from outside the region, entry `fossil gas`) and `gas production`; carbon at the network's gas intensity |
+| Study-wide crude oil and refining | `oil primary` generators (entry `crude oil`) and `oil refining` output |
+| Solid biomass | the node's `solid biomass` / `unsustainable solid biomass` generators; imports = `solid biomass import` links |
+| Nuclear losses | the reactor links' own losses (`nuclear_2`) |
+| Carbon-neutral imports (`import biogas`, `import bioliquids`, `import gas`) | the link (port 0 is the atmosphere, the energy row would otherwise be dropped) |
+| Industry with capture | process nodes `bic`, `gic`: fuel + capture electricity in, losses out |
+| Outputs above the fuel's LHV (condensing boilers, biomass CHPs) | inflow "condensation heat gain" (`lhv`) into the fuel node, not a reversed loss |
+
+**EU-wide buses.** Oil, methanol, coal, uranium and imported solid biomass sit on one
+EU bus: a country has no trade in them, only a draw. Its own production serves its
+own use first; the shortfall comes "From the EU pool", the surplus goes "To the EU
+pool" (never both). Imports from outside the region appear only on the study-wide
+Sankey. A country's oil has no fossil / synthetic split: the model does not have one.
+Self-sufficiency counts the pools as imports and exports.
+
+**Decentral heat buses.** PyPSA-Eur attaches non-building heat loads to the buildings'
+decentral buses: agriculture heat to the `rural heat` bus of every node, and
+low-temperature heat for industry to the `urban decentral heat` bus where a node has no
+district heating (`scripts/prepare_sector_network.py`, `add_agriculture` and
+`add_industry`, PyPSA-Eur-CANEU `develop` 2026-11-18). Heat on a bus is fungible, so
+each load gets the bus's supply mix pro rata of its annual energy:
+
+    share(sector, bus) = annual load of the sector on the bus / annual load of the bus
+    moved(fuel, sector) = Σ_bus share(sector, bus) × heat delivered to the bus by fuel
+
+The supply mix is read per technology: heat pumps split into electricity (the
+low-voltage port) and ambient heat (delivered − electricity), boilers and resistive
+heaters on their input, solar thermal on its generator; water tanks and vents are not
+supply. `moved` leaves the `fuel → res` edges (scaled) for `fuel → ind` / `fuel → agr`;
+the code table's `vap_fe → ind` (low-temperature heat drawn as district heat) and
+`pac_fe → agr` (agriculture heat drawn as ambient heat) are removed for those loads
+(`indicators._decentral_heat_reallocation`). Before, agriculture heat was all ambient
+heat taken off the residential heat-pump edge (BE 2040: 5.8 TWh ambient; now 4.1 ambient,
+1.6 electricity, 0.1 gas).
+
+**Left as sums, not remainders.** Deliveries from a secondary to a final carrier
+(`elc_se → elc_fe` …) and a primary node's outflow to its secondary node are the sum of
+the measured final uses: a pass-through, not a closure.
+
+**Tests.** `test_carbon_balance.py` runs on the two current runs when on disk: reported
+emissions = the model's atmosphere, carbon nodes balance, pool carriers never in and out
+of a country, every energy node of DE00AC, GB00AC (and SE01AC) balances, no negative edge.
+
+**Reversibility: Medium** — each reading has the old remainder as fallback in the same
+step of `_close_energy_graph` / `_close_carbon_graph`; the taxonomy rows added are listed
+in the test ratchets of `test_taxonomy_integrity.py`.

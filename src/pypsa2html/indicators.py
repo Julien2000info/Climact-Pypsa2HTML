@@ -106,7 +106,7 @@ logger = logging.getLogger(__name__)
 SE_TO_FE_CARRIERS: tuple[str, ...] = ("vap", "elc", "gaz", "hyd", "bev")
 
 #: Carriers delivered from a primary energy straight to final use.
-PE_TO_FE_CARRIERS: tuple[str, ...] = ("pac", "enc", "cms")
+PE_TO_FE_CARRIERS: tuple[str, ...] = ("pac", "enc", "cms", "sth")
 
 #: Renewable injections into the gas grid, subtracted to obtain fossil gas.
 GAS_GRID_RENEWABLE: tuple[tuple[str, str, str], ...] = (
@@ -943,6 +943,135 @@ def _measured_link_trade(ctx, node: str, years, carriers: Sequence[str]):
     return imports, exports
 
 
+#: Heat buses without a network, shared by the buildings and other sectors' loads.
+DECENTRAL_HEAT_BUSES: tuple[str, ...] = ("rural heat", "urban decentral heat")
+
+#: Non-building heat loads PyPSA-Eur attaches to those buses, and their sector node:
+#: agriculture heat always on the rural bus; low-temperature heat for industry on the
+#: urban decentral bus where a node has no district heating (prepare_sector_network).
+DECENTRAL_HEAT_SECTOR_LOADS: dict[str, str] = {
+    "low-temperature heat for industry": "ind",
+    "agriculture heat": "agr",
+}
+
+#: Final-energy node of the input feeding a decentral heating technology.
+_HEAT_INPUT_FE: dict[str, str] = {
+    "low voltage": "elc_fe", "AC": "elc_fe", "gas": "gaz_fe", "solid biomass": "enc_fe",
+    "oil": "pet_fe", "H2": "hyd_fe", "ambient": "pac_fe", "solar thermal": "sth_fe",
+}
+
+
+def _decentral_heat_reallocation(ctx, node: str, years):
+    """Share of the decentral heat buses' supply that serves industry and agriculture.
+
+    On a ``rural heat`` or ``urban decentral heat`` bus the heat is fungible: every load
+    gets the bus's supply mix in proportion to its annual energy. The supply mix is the
+    heat each technology delivers to the bus, read on the model, per input: heat pumps
+    split into electricity (port 1) and ambient heat (delivered - electricity), boilers
+    and resistive heaters on their fuel, solar thermal on its generator; storage
+    (water tanks) and vents are not supply. That is the convention of the residential
+    edges (each fuel's edge carries the heat it delivers).
+
+    Returns ``(moves, lt_heat, agri_heat)``: ``moves[(fe, sector)]`` TWh/year to move
+    from ``fe -> res`` to ``fe -> sector``; ``lt_heat`` the low-temperature industry
+    heat on decentral buses (drawn as district heat by the code table); ``agri_heat``
+    the agriculture heat (drawn as ambient heat by the code table). ``None`` without
+    networks.
+    """
+    if not _has_networks(ctx):
+        return None
+    locations = (
+        ctx.locations_for(node)
+        if hasattr(ctx, "locations_for")
+        else (None if ctx.is_aggregate(node) else [node])
+    )
+    moves: dict[tuple[str, str], pd.Series] = {}
+    lt_heat, agri_heat = _zeros(years), _zeros(years)
+    for year in years:
+        try:
+            n = ctx.networks[int(year)]
+        except Exception:  # noqa: BLE001
+            continue
+        w = n.snapshot_weightings.generators
+        buses = n.buses[n.buses["carrier"].isin(DECENTRAL_HEAT_BUSES)]
+        if locations is not None:
+            buses = buses[buses["location"].isin(locations)]
+        if buses.empty:
+            continue
+        loads = n.loads[n.loads["bus"].isin(buses.index)]
+        if "p" in n.loads_t and not n.loads_t.p.empty:
+            load_e = n.loads_t.p.reindex(columns=loads.index).fillna(0.0).mul(w, axis=0).sum()
+        else:
+            load_e = n.loads_t.p_set.reindex(columns=loads.index).fillna(0.0).mul(
+                w, axis=0).sum()
+        load_e = load_e / 1e6
+        totals = {f"p{p}": n.links_t[f"p{p}"].mul(w, axis=0).sum() / 1e6
+                  for p in range(5) if f"p{p}" in n.links_t and not n.links_t[f"p{p}"].empty}
+        gen_e = n.generators_t.p.mul(w, axis=0).sum() / 1e6
+        for bus in buses.index:
+            here = loads[loads["bus"] == bus]
+            total_load = float(load_e.reindex(here.index).sum())
+            sector_load = {
+                sector: float(load_e.reindex(here.index[here["carrier"] == carrier]).sum())
+                for carrier, sector in DECENTRAL_HEAT_SECTOR_LOADS.items()
+            }
+            lt_heat.loc[year] += sector_load["ind"]
+            agri_heat.loc[year] += sector_load["agr"]
+            if total_load <= 0 or not any(v > 0 for v in sector_load.values()):
+                continue
+            supply: dict[str, float] = {}
+            for port in range(5):
+                col = f"bus{port}"
+                if col not in n.links or f"p{port}" not in totals:
+                    continue
+                at_bus = n.links.index[n.links[col] == bus]
+                for name in at_bus:
+                    carrier = n.links.at[name, "carrier"]
+                    if "water tanks" in carrier:
+                        continue
+                    delivered = -float(totals[f"p{port}"].get(name, 0.0))
+                    if delivered <= 0:
+                        continue
+                    inputs = {}
+                    for q in range(5):
+                        bq = n.links.at[name, f"bus{q}"] if f"bus{q}" in n.links else ""
+                        if q == port or not isinstance(bq, str) or not bq:
+                            continue
+                        value = float(totals.get(f"p{q}", pd.Series(dtype=float)).get(name, 0.0))
+                        kind = n.buses.at[bq, "carrier"]
+                        if value > 0 and "co2" not in kind:
+                            inputs[kind] = inputs.get(kind, 0.0) + value
+                    if "heat pump" in carrier:
+                        electricity = sum(v for k, v in inputs.items() if k in ("low voltage", "AC"))
+                        parts = {"low voltage": electricity, "ambient": delivered - electricity}
+                    elif inputs:
+                        main = max(inputs, key=inputs.get)
+                        parts = {main: delivered}
+                    else:
+                        continue
+                    for kind, value in parts.items():
+                        supply[kind] = supply.get(kind, 0.0) + value
+            solar = n.generators.index[(n.generators["bus"] == bus)
+                                       & n.generators["carrier"].str.contains("solar thermal")]
+            if len(solar):
+                supply["solar thermal"] = supply.get("solar thermal", 0.0) + float(
+                    gen_e.reindex(solar).sum())
+            for sector, value in sector_load.items():
+                share = value / total_load
+                if share <= 0:
+                    continue
+                for kind, heat in supply.items():
+                    fe = _HEAT_INPUT_FE.get(kind)
+                    if fe is None:
+                        logger.warning("decentral heat input %r not mapped; left in res", kind)
+                        continue
+                    key = (fe, sector)
+                    if key not in moves:
+                        moves[key] = _zeros(years)
+                    moves[key].loc[year] += share * heat
+    return moves, lt_heat, agri_heat
+
+
 def _gas_intensity(ctx, years) -> pd.Series:
     """Carbon content of gas as the network burns it [tCO2/MWh = MtCO2/TWh]."""
     from .extract.emissions import _DEFAULT_INTENSITY, network_fuel_intensity
@@ -1072,9 +1201,30 @@ def _close_energy_graph(ctx, node: str, flows: pd.DataFrame) -> pd.DataFrame:
     # what leaves `pac_fe`.  Run afterwards — as it was until 2026-09-07 — it
     # shrinks the outflow after the inflow has been fixed, leaving `pac_fe`
     # short by exactly the agricultural heat (BEWAL: 0.147 TWh, every horizon).
-    flows[("pac_fe", "res", "gr")] = column(flows, ("pac_fe", "res", "gr")) - column(
-        flows, ("pac_fe", "agr", "")
-    )
+    realloc = _decentral_heat_reallocation(ctx, node, years)
+    if realloc is None:
+        flows[("pac_fe", "res", "gr")] = column(flows, ("pac_fe", "res", "gr")) - column(
+            flows, ("pac_fe", "agr", "")
+        )
+    else:
+        # Read on the model instead (2026-11-18): the decentral heat buses' supply mix
+        # shared out pro rata of their loads (see _decentral_heat_reallocation). The
+        # code table drew agriculture heat as ambient heat and low-temperature
+        # industry heat on decentral buses as district heat (SE01: 0.3 TWh of district
+        # heat with no supply).
+        moves, lt_heat, agri_heat = realloc
+        flows[("vap_fe", "ind", "")] = column(flows, ("vap_fe", "ind", "")) - lt_heat
+        flows[("pac_fe", "agr", "")] = column(flows, ("pac_fe", "agr", "")) - agri_heat
+        for (fuel, sector), amount in moves.items():
+            res = [c for c in flows.columns if c[0] == fuel and c[1] == "res"]
+            total = sum((flows[c] for c in res), _zeros(years))
+            if (amount > total + 1e-6).any():
+                logger.warning("%s: decentral %s heat for %s above the %s -> res edges",
+                               node, fuel, sector, fuel)
+            factor = (1 - amount / total.where(total > 0)).fillna(1.0).clip(lower=0.0)
+            for c in res:
+                flows[c] = flows[c] * factor
+            flows[(fuel, sector, "")] = column(flows, (fuel, sector, "")) + amount
 
     # -- 0b. multi-input conversions as process nodes ---------------------
     _close_process_nodes(flows)

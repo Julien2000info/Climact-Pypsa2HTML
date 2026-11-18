@@ -293,8 +293,11 @@ def test_eu_pool_carriers_do_not_loop_through_a_country(tmp_path, RUN_NAME):
     path = tmp_path / "p2h.yaml"
     path.write_text(yaml.safe_dump(cfg))
     ctx = build_context(load_config(path), RUN_NAME)
-    for node in ("DE00AC", "GB00AC"):
+    nodes = ["DE00AC", "GB00AC"] + (["SE01AC"] if "SE01AC" in ctx.nodes.codes else [])
+    for node in nodes:
         flows = indicators.for_node(ctx, node).flows
+        # decentral heat shared out by sector (2026-11-18): no edge turns negative
+        assert (flows >= -1e-9).all().all(), (node, flows.columns[(flows < -1e-9).any()])
         assert (indicators.column(flows, ("pet_pe", "pet_fe", "")) == 0).all()
         for code in ("pet_fe", "met_fe"):
             into = indicators.column(flows, ("eupi", code, ""))
