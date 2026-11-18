@@ -267,3 +267,38 @@ def test_reported_emissions_equal_the_models_atmosphere(tmp_path, RUN_NAME):
         net = sum(v for (a, b, t), v in row.items()
                   if a == "atm" and b in ("net_ghg", "netcap_ghg", "netoth_ghg"))
         assert net == pytest.approx(model, abs=0.5), year
+
+
+@_on_disk
+def test_eu_pool_carriers_do_not_loop_through_a_country(tmp_path, RUN_NAME):
+    """Oil, methanol, coal and uranium sit on one EU bus: a country only takes its
+    shortfall from the pool or sends its surplus to it (never both), has no fossil
+    oil of its own, and every energy node balances (2026-11-18)."""
+    import yaml
+
+    from pypsa2html import indicators
+    from pypsa2html.config import load_config
+    from pypsa2html.context import build_context
+
+    cfg = {
+        "root": str(RUN),
+        "model": {"network_pattern": "networks/solved_{horizon}.nc", "flow_threshold": 0.01},
+        "nodes": {"detect": True, "aggregate": {"enabled": True, "code": "ALL",
+                                                "label": "All countries"}},
+        "scenarios": [{"name": RUN_NAME, "label": RUN_NAME,
+                       "results_dir": f"results/{RUN_NAME}",
+                       "resources_dir": f"resources/{RUN_NAME}"}],
+        "output": {"dir": str(tmp_path / "html")},
+    }
+    path = tmp_path / "p2h.yaml"
+    path.write_text(yaml.safe_dump(cfg))
+    ctx = build_context(load_config(path), RUN_NAME)
+    for node in ("DE00AC", "GB00AC"):
+        flows = indicators.for_node(ctx, node).flows
+        assert (indicators.column(flows, ("pet_pe", "pet_fe", "")) == 0).all()
+        for code in ("pet_fe", "met_fe"):
+            into = indicators.column(flows, ("eupi", code, ""))
+            out = indicators.column(flows, (code, "eupe", ""))
+            assert ((into == 0) | (out == 0)).all(), (node, code)
+        imb = indicators.graph_imbalances(flows, ctx.taxonomy)
+        assert imb.empty, (node, imb.to_dict("records"))

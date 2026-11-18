@@ -251,6 +251,12 @@ IMPORT_FLOWS: tuple[tuple[str, str, str], ...] = (
     ("ura_pe", "elc_se", "thm"),
     ("imp", "cms_pe", ""),
     ("imp", "oth_pe", ""),
+    # a country's draw on the EU-wide pools (EU_POOL_CARRIERS)
+    ("eupi", "pet_fe", ""),
+    ("eupi", "met_fe", ""),
+    ("eupi", "cms_pe", ""),
+    ("eupi", "ura_pe", ""),
+    ("eupi", "enc_pe", ""),
 )
 
 #: Flows reported as domestic production in the per-node trade summary.
@@ -267,6 +273,8 @@ EXPORT_FLOWS: tuple[tuple[str, str, str], ...] = (
     ("met_fe", "exp", ""),
     ("amm_fe", "exp", ""),
     ("gaz_se", "exp", ""),
+    ("pet_fe", "eupe", ""),
+    ("met_fe", "eupe", ""),
 )
 
 
@@ -299,6 +307,11 @@ PROCESS_NODES: dict[str, FlowKey] = {
     "mtn": ("hyd_se", "mtn", ""),  # methanolisation: H2 (main) + electricity
     "hbn": ("elc_se", "hbn", ""),  # Haber-Bosch: electricity (main) + H2
     "ebf": ("enc_pe", "ebf", ""),  # electrobiofuels: solid biomass (main) + H2
+    # industry with carbon capture: fuel (main) + electricity for the capture; the
+    # link's losses leave the process node (2026-11-18: the electricity was unmapped
+    # and the biomass losses had no edge)
+    "bic": ("enc_pe", "bic", ""),
+    "gic": ("gaz_se", "gic", ""),
 }
 
 #: The renewable share of each final carrier.  The first five reproduce the
@@ -337,7 +350,8 @@ RENEWABLE_SHARES: tuple[_CarrierMix, ...] = (
     _CarrierMix("enc_fe", ("enc_fe",), renewable=("enc_pe",)),
     _CarrierMix("pac_fe", ("pac_fe",), renewable=("pac_pe",)),
     _CarrierMix("amm_fe", ("amm_fe",), renewable=("elc_se", "hyd_se", "imp", "hbn")),
-    _CarrierMix("met_fe", ("met_fe",), renewable=("elc_se", "hyd_se", "imp", "mtn", "enc_pe")),
+    _CarrierMix("met_fe", ("met_fe",),
+               renewable=("elc_se", "hyd_se", "imp", "eupi", "mtn", "enc_pe")),
 )
 
 
@@ -877,6 +891,40 @@ def year_weights(ctx, years: Sequence[int]) -> pd.Series:
 # ---------------------------------------------------------------------------
 
 
+#: Carriers on one EU-wide bus in PyPSA-Eur(-CANEU). A country does not trade them with
+#: its neighbours: what it makes beyond its own use goes to the EU pool, what it uses
+#: beyond its own production comes from it (nodes ``eupi`` / ``eupe``). Imports from
+#: outside the study region appear only on the study-wide Sankey.
+EU_POOL_CARRIERS: tuple[str, ...] = ("pet", "met", "cms", "ura")
+
+
+def _measured_generation(ctx, node: str, years, carriers: Sequence[str]) -> pd.Series | None:
+    """Annual output (TWh) of the node's generators of ``carriers``, read on the model;
+    ``None`` without networks."""
+    if not hasattr(ctx, "networks"):
+        return None
+    locations = (
+        ctx.locations_for(node)
+        if hasattr(ctx, "locations_for")
+        else (None if ctx.is_aggregate(node) else [node])
+    )
+    out = _zeros(years)
+    for year in years:
+        try:
+            n = ctx.networks[int(year)]
+        except Exception:  # noqa: BLE001 - a missing horizon is not fatal
+            continue
+        gens = n.generators[n.generators["carrier"].isin(carriers)]
+        if locations is not None:
+            gens = gens[gens["bus"].map(n.buses["location"]).isin(locations)]
+        if gens.empty:
+            continue
+        weights = n.snapshot_weightings.generators
+        p = n.generators_t.p.reindex(columns=gens.index).fillna(0.0)
+        out.loc[year] = float(p.mul(weights, axis=0).sum().sum()) / 1e6
+    return out
+
+
 def _measured_electricity_trade(ctx, node: str, years) -> tuple[pd.Series, pd.Series] | None:
     """Real cross-border electricity for ``node``, TWh/year, or ``None``.
 
@@ -987,9 +1035,15 @@ def _close_energy_graph(ctx, node: str, flows: pd.DataFrame) -> pd.DataFrame:
     # Oil is one EU-level pool: a node making more liquid fuel than it uses
     # (e.g. electrobiofuels) exports the surplus instead of a negative fossil
     # flow. The original wrote ``fischer - biomass_liquid - demand`` there.
-    flows[("pet_pe", "pet_fe", "")] = (demand - synthetic).clip(lower=0)
-    if not aggregate:
-        flows[("pet_fe", "exp", "")] = (synthetic - demand).clip(lower=0)
+    if aggregate:
+        flows[("pet_pe", "pet_fe", "")] = (demand - synthetic).clip(lower=0)
+    else:
+        # A country draws oil products from the EU pool: local liquid-fuel production
+        # serves local use first; the shortfall comes from the pool, the surplus goes
+        # to it. Its fossil / synthetic split is not in the model (one EU bus).
+        flows[("pet_pe", "pet_fe", "")] = _zeros(years)
+        flows[("eupi", "pet_fe", "")] = (demand - synthetic).clip(lower=0)
+        flows[("pet_fe", "eupe", "")] = (synthetic - demand).clip(lower=0)
 
     base_year = ctx.config.model.base_year
     if base_year is not None and base_year in years:
@@ -997,6 +1051,9 @@ def _close_energy_graph(ctx, node: str, flows: pd.DataFrame) -> pd.DataFrame:
         # fuels, so all of its liquid demand is fossil.  The legacy code
         # hardcoded this for 2020; pypsa-wal dropped it with its base year.
         flows.loc[base_year, ("pet_pe", "pet_fe", "")] = demand.loc[base_year]
+        if not aggregate:
+            for key in (("eupi", "pet_fe", ""), ("pet_fe", "eupe", "")):
+                flows.loc[base_year, key] = 0.0
 
     # NB: the pypsa-wal fork subtracts the electricity distribution losses
     # (``elc_se -> per`` type ``dis``) from the residential electricity demand
@@ -1042,7 +1099,7 @@ def _close_energy_graph(ctx, node: str, flows: pd.DataFrame) -> pd.DataFrame:
 
     # -- 6. domestic production versus imports -----------------------------
     pe_supply = sum_by(flows, where="Source", nodes=pe, by="Source")
-    domestic = list(DOMESTIC_CARRIERS) + (["enc"] if aggregate else [])
+    domestic = list(DOMESTIC_CARRIERS)
     for carrier in domestic:
         flows[("prod", f"{carrier}_pe", "")] = pe_supply.get(f"{carrier}_pe", _zeros(years))
     # Domestic production the model has as its own generators (PyPSA-Eur-CANEU
@@ -1052,7 +1109,8 @@ def _close_energy_graph(ctx, node: str, flows: pd.DataFrame) -> pd.DataFrame:
 
     for carrier in IMPORTED_CARRIERS:
         used = pe_supply.get(f"{carrier}_pe", _zeros(years))
-        flows[("imp", f"{carrier}_pe", "")] = (used - modelled(carrier)).clip(lower=0)
+        source = "eupi" if (carrier in EU_POOL_CARRIERS and not aggregate) else "imp"
+        flows[(source, f"{carrier}_pe", "")] = (used - modelled(carrier)).clip(lower=0)
 
     for carrier, table, what in (
         ("gaz", ctx.taxonomy.domestic_gas, "domestic gas production"),
@@ -1068,27 +1126,22 @@ def _close_energy_graph(ctx, node: str, flows: pd.DataFrame) -> pd.DataFrame:
             surplus = (modelled(carrier) - pe_supply.get(f"{carrier}_pe", _zeros(years)))
             flows[(f"{carrier}_pe", "exp", "")] = surplus.clip(lower=0)
 
-    # -- 7. biomass: exogenous potential versus modelled consumption -------
-    if not aggregate:
-        potential = biomass_potential(ctx, node, list(years))
-        if potential is None:
-            # No potential file: the model's own supply is domestic production, as
-            # the log says. Without this the node had outputs and no input (EU28
-            # report 2026-11-18: every node's solid biomass unbalanced).
-            flows[("prod", "enc_pe", "")] = pe_supply.get("enc_pe", _zeros(years))
-        else:
-            # A horizon with no potential file keeps the model's own value;
-            # the négaWatt study ships none for its calibration year and the
-            # original patched that up with a hardcoded ``.loc['2020']``.
-            potential = potential.fillna(column(flows, ("prod", "enc_pe", "")))
-            used = pe_supply.get("enc_pe", _zeros(years))
-            flows[("prod", "enc_pe", "")] = potential
-            # Clipped, like the elc/hyd balances below.  The original left both
-            # signed, so one of the pair was always a negative flow: invisible
-            # in the Sankey, which filters ``> 0``, but not in the primary
-            # energy totals, where a negative export subtracted real supply.
-            flows[("imp", "enc_pe", "")] = (used - potential).clip(lower=0)
-            flows[("enc_pe", "exp", "")] = (potential - used).clip(lower=0)
+    # -- 7. solid biomass: the model's own generators and the import pool -----
+    # Domestic supply is the output of the node's solid-biomass generators; imports
+    # are the ``solid biomass import`` links from the EU import pool (code
+    # presencimp, eupi -> enc_pe), which on the study-wide Sankey are imports from
+    # outside. Both are read on the model (2026-11-18: an exogenous potential file
+    # used to set domestic supply and the import was the remainder).
+    generated = _measured_generation(
+        ctx, node, years, ("solid biomass", "unsustainable solid biomass"))
+    if generated is not None:
+        flows[("prod", "enc_pe", "")] = generated
+    elif not aggregate:
+        flows[("prod", "enc_pe", "")] = pe_supply.get("enc_pe", _zeros(years))
+    if aggregate:
+        pooled = column(flows, ("eupi", "enc_pe", ""))
+        flows[("eupi", "enc_pe", "")] = _zeros(years)
+        flows[("imp", "enc_pe", "")] = column(flows, ("imp", "enc_pe", "")) + pooled
 
     # -- 8. trade in secondary carriers ------------------------------------
     if not aggregate:
@@ -1121,8 +1174,9 @@ def _close_energy_graph(ctx, node: str, flows: pd.DataFrame) -> pd.DataFrame:
             continue
         supply = produced.get(code, _zeros(years))
         demand = consumed.get(code, _zeros(years))
-        flows[("imp", code, "")] = (demand - supply - electricity).clip(lower=0)
-        flows[(code, "exp", "")] = (supply - demand - electricity).clip(lower=0)
+        into, out_of = ("eupi", "eupe") if carrier in EU_POOL_CARRIERS else ("imp", "exp")
+        flows[(into, code, "")] = (demand - supply - electricity).clip(lower=0)
+        flows[(code, out_of, "")] = (supply - demand - electricity).clip(lower=0)
 
     # -- 10. (was: rural heat pumps exclude the agricultural share) --------
     # Moved to step 0 so the `pac_pe -> pac_fe` closure sees the corrected
@@ -1174,13 +1228,13 @@ def _close_carbon_graph(
     # at the carbon the model's own flows carry (the cost table's methanolisation
     # CO2 input differs from the model's intensities, 3 Mt at GB00AC, 2026-11-10).
     if not aggregate:
-        for edge in (("hth_ghg", "met_ghg", ""), ("met_ghg", "eth_ghg", "")):
+        for edge in (("eupi_ghg", "met_ghg", ""), ("met_ghg", "eupe_ghg", "")):
             flows_co2[edge] = _zeros(years)
         out_m = sum_by(flows_co2, where="Source", nodes=["met_ghg"], by="Source")
         in_m = sum_by(flows_co2, where="Target", nodes=["met_ghg"], by="Target")
         net = out_m.get("met_ghg", _zeros(years)) - in_m.get("met_ghg", _zeros(years))
-        flows_co2[("hth_ghg", "met_ghg", "")] = net.clip(lower=0.0)
-        flows_co2[("met_ghg", "eth_ghg", "")] = (-net).clip(lower=0.0)
+        flows_co2[("eupi_ghg", "met_ghg", "")] = net.clip(lower=0.0)
+        flows_co2[("met_ghg", "eupe_ghg", "")] = (-net).clip(lower=0.0)
 
     # -- a country draws its oil from the EU-wide oil bus and its gas through
     # pipelines it does not book: its fossil inflow is every carbon flow leaving
@@ -1196,9 +1250,14 @@ def _close_carbon_graph(
                 (flows_co2[c] for c in fossil), _zeros(years))
             for c in fossil:
                 flows_co2[c] = _zeros(years)
-            flows_co2[(fossil_node, fuel_node, "")] = (
-                out_f.get(fuel_node, _zeros(years)) - other_in
-            )
+            net = out_f.get(fuel_node, _zeros(years)) - other_in
+            if fuel_node == "oil_ghg":
+                # oil comes from the EU pool, not from a national fossil source
+                flows_co2[(fossil_node, fuel_node, "")] = _zeros(years)
+                flows_co2[("eupi_ghg", "oil_ghg", "")] = net.clip(lower=0.0)
+                flows_co2[("oil_ghg", "eupe_ghg", "")] = (-net).clip(lower=0.0)
+            else:
+                flows_co2[(fossil_node, fuel_node, "")] = net
 
     # -- process emissions: the naphtha share enters from the naphtha node, the
     # rest (calcination, ...) is drawn from "industrial processes" ------------
@@ -1457,13 +1516,18 @@ class Indicators:
         """
         years = self.flows.index
         domestic_pe = _endpoint_sum(self.flows, "Source", "prod")
-        net_pe = _endpoint_sum(self.flows, "Source", "imp") - _endpoint_sum(
-            self.flows, "Target", "exp"
+        # The EU pools (``eupi`` / ``eupe``) are imports and exports of the region.
+        net_pe = (
+            _endpoint_sum(self.flows, "Source", "imp")
+            + _endpoint_sum(self.flows, "Source", "eupi")
+            - _endpoint_sum(self.flows, "Target", "exp")
+            - _endpoint_sum(self.flows, "Target", "eupe")
         )
         mode = nuclear_primary_mode(self.ctx)
         if mode in NUCLEAR_PRIMARY_ELECTRICAL:
             nuc_elc = column(self.flows, ("ura_pe", "elc_se", "thm"))
-            ura_imp = column(self.flows, ("imp", "ura_pe", ""))
+            ura_imp = column(self.flows, ("imp", "ura_pe", "")) + column(
+                self.flows, ("eupi", "ura_pe", ""))
             # Both electrical modes drop the reactor's thermal losses from the
             # balance; they differ only in which side the kWh land on.
             net_pe = net_pe - ura_imp

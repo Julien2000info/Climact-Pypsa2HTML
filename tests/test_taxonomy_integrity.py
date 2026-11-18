@@ -129,7 +129,13 @@ def test_energy_sankey_unresolved_edges_do_not_increase(tax, produced_codes):
     # 232: +1 thermal storage standing losses (`losstes`, computed).
     # 233: +1 natural gas exports of a producing node (`proexpgaspe`, computed:
     # Norwegian gas fields in the PyPSA-Eur-CANEU NW Europe run).
-    assert len(referenced - produced_codes) <= 233
+    # 245: +12 for the EU pools and capture (2026-11-18): oil, methanol, coal and
+    # uranium from / to the EU pool, solid biomass from the import pool, the two
+    # capture process nodes (main inputs `gazgic`, `encbic`, computed; capture
+    # electricity `prelcgic`, `prelcbic`, `prelcpcc`; biomass CC losses).
+    # 247: +2 condensation heat gains of biomass CHPs and gas boilers (`lhvbchp`,
+    # `lhvgas`: outputs above the fuel's LHV).
+    assert len(referenced - produced_codes) <= 247
 
 
 def test_value_codes_reused_across_edges_are_known(tax):

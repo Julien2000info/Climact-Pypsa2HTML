@@ -85,6 +85,16 @@ urban decentral heat,Residential and tertiary heat demand,TWh,demandheatc
 rural biomass boiler_2,rural biomass boiler losses,TWh,lossbb
 urban central water tanks charger,TES charging,TWh,pretesdhs
 gas for industry CC_2,Transformation losses gas for industry CC,TWh,lossgasind
+gas for industry CC_3,Electricity for capture (gas for industry),TWh,prelcgic
+solid biomass for industry CC_3,Electricity for capture (biomass for industry),TWh,prelcbic
+process emissions CC,Electricity for process-emission capture,TWh,prelcpcc
+urban central solid biomass CHP (LHV gain),Condensation heat gain biomass CHP,TWh,lhvbchp
+urban central solid biomass CHP CC (LHV gain),Condensation heat gain biomass CHP CC,TWh,lhvbchp
+urban central gas boiler (LHV gain),Condensation heat gain gas boiler,TWh,lhvgas
+urban decentral gas boiler (LHV gain),Condensation heat gain gas boiler,TWh,lhvgas
+rural gas boiler (LHV gain),Condensation heat gain gas boiler,TWh,lhvgas
+urban central gas CHP (LHV gain),Condensation heat gain gas CHP,TWh,lhvgas
+urban central gas CHP CC (LHV gain),Condensation heat gain gas CHP,TWh,lhvgas
 SMR_2,Transformation losses (steam methane reforming),TWh,lossmr
 SMR CC_2,Transformation losses (steam methane reforming),TWh,lossmrr
 urban central heat,Residential and tertiary DH demand,TWh,presvapcfdhs

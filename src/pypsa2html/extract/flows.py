@@ -701,6 +701,33 @@ def _orient(flows: pd.DataFrame) -> pd.DataFrame:
     return flows
 
 
+#: Pseudo source of the energy a link delivers beyond its inputs' lower heating value.
+LHV_GAIN = "lhv gain"
+
+#: Links whose negative energy residual has its own treatment: heat pumps (ambient
+#: heat rows) and naphtha for industry (process-emission port, ``*_4`` code).
+_GAIN_EXCLUDED = ("heat pump", "naphtha for industry")
+
+
+def _lhv_gains(flows: pd.DataFrame) -> pd.DataFrame:
+    """A link whose outputs exceed its inputs (condensing boilers, biomass CHPs with
+    flue-gas condensation: technology-data efficiencies on the lower heating value)
+    has a negative loss. ``_orient`` turned it into a loss drawn the other way, which
+    the code table read as an ordinary loss: the fuel node then lost twice the gain
+    (DE 2030 biomass CHPs: 11 TWh, 2026-11-18). It becomes an inflow from
+    ``lhv gain`` into the link's input carrier, entry ``<carrier> (LHV gain)``."""
+    gain = (
+        (flows["source"] == LOSSES)
+        & (flows["origin"] == "link")
+        & ~flows["carrier"].str.contains("|".join(_GAIN_EXCLUDED), na=False)
+    )
+    if gain.any():
+        flows = flows.copy()
+        flows.loc[gain, "source"] = LHV_GAIN
+        flows.loc[gain, "carrier"] = flows.loc[gain, "carrier"] + " (LHV gain)"
+    return flows
+
+
 def _merge_generators_into_links(flows: pd.DataFrame) -> pd.DataFrame:
     """A generator that does what a same-carrier link's output port does joins that row.
 
@@ -766,6 +793,7 @@ def _flows_for_horizon(ctx: BuildContext, node: str, horizon: int) -> pd.Series:
     flows = _link_flows(network, links, totals=totals)
     flows = _heat_pump_rows(network, links, flows, totals=totals)
     flows = _orient(flows)
+    flows = _lhv_gains(flows)
 
     # DAC has no single output bus: the legacy code relabelled every DAC row so
     # that the CO2 ports survive the CO2 filter below.  Kept for compatibility
