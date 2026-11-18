@@ -228,9 +228,11 @@ CARBON_FLOWS: tuple[CarbonFlow, ...] = (
     CarbonFlow("urban central oil boiler", "oil", ATMOSPHERE, ("urban central oil boiler",), 2),
     # Biogas: the CO2 comes out of the atmosphere and goes back into the gas
     # grid, so the same number is booked twice, in opposite directions.
-    CarbonFlow("biogas to gas", ATMOSPHERE, "biogas", ("biogas to gas",), 2, sign=1.0,
-               match="prefix"),
-    CarbonFlow("biogas to gas", "biogas", "gas", ("biogas to gas",), 2, sign=1.0, match="prefix",
+    # Exact match: port 2 of "biogas to gas CC" is CO2 *stored* (booked below); the
+    # prefix match read it as a negative uptake (-45 Mt on the EU28 run 2040,
+    # absorbed into the countries' residual fossil gas; 2026-11-18).
+    CarbonFlow("biogas to gas", ATMOSPHERE, "biogas", ("biogas to gas",), 2, sign=1.0),
+    CarbonFlow("biogas to gas", "biogas", "gas", ("biogas to gas",), 2, sign=1.0,
                same_as_previous=True),
     CarbonFlow("biogas to gas CC", "biogas", STORED, ("biogas to gas CC",), 2),
     CarbonFlow("biogas to gas CC2", ATMOSPHERE, "biogas", ("biogas to gas CC",), 3, sign=1.0),
@@ -297,6 +299,12 @@ CARBON_FLOWS: tuple[CarbonFlow, ...] = (
                ("urban central solid biomass CHP CC",), 3, sign=1.0),
     CarbonFlow("urban central solid biomass CHP CC", "BECCS", STORED,
                ("urban central solid biomass CHP CC",), 4),
+    # PyPSA-Eur-CANEU renewable waste CHP CC (`patex.renewable_waste`): the biogenic
+    # carbon of the waste comes out of the atmosphere (port 3) and is stored (port 4);
+    # the plain renewable waste CHP has no CO2 port (net zero).
+    CarbonFlow("renewable waste CHP CC", ATMOSPHERE, "BECCS", ("renewable waste CHP CC",), 3,
+               sign=1.0),
+    CarbonFlow("renewable waste CHP CC", "BECCS", STORED, ("renewable waste CHP CC",), 4),
     CarbonFlow("naphtha for industry", "oil", "process emissions", ("naphtha for industry",), 2),
     CarbonFlow("kerosene for aviation", "oil", ATMOSPHERE, ("kerosene for aviation",), 2),
     CarbonFlow("oil refining emissions", "oil", ATMOSPHERE, ("oil refining",), 2),
@@ -308,7 +316,9 @@ CARBON_FLOWS: tuple[CarbonFlow, ...] = (
     CarbonFlow("Electrobiofuels", "solid biomass", "oil", ("electrobiofuels",), 3, sign=1.0),
     CarbonFlow("Electrobiofuels", ATMOSPHERE, "solid biomass", ("electrobiofuels",), 3, sign=1.0,
                same_as_previous=True),
-    CarbonFlow("Waste CHP emissions", "Waste CHP", ATMOSPHERE, ("waste CHP",), 3, match="prefix"),
+    # exact: port 3 of "waste CHP CC" is "Waste CHP CC1" (the prefix match booked the
+    # residual of capture plants twice, EU28 report 2026-11-18)
+    CarbonFlow("Waste CHP emissions", "Waste CHP", ATMOSPHERE, ("waste CHP",), 3),
     CarbonFlow("Waste CHP CC", "Waste CHP", STORED, ("waste CHP CC",), 4),
     CarbonFlow("Waste CHP CC1", "Waste CHP", ATMOSPHERE, ("waste CHP CC",), 3),
     CarbonFlow("HVC to air", "oil", ATMOSPHERE, ("HVC to air",), 1),
@@ -735,8 +745,8 @@ def _balance_for_horizon(ctx: BuildContext, node: str, horizon: int) -> pd.DataF
                    feedstock))
     # Waste burned in waste CHPs (PyPSA-Eur-CANEU ``patex.waste_to_energy``: PatEx's
     # non-renewable waste-to-energy): its carbon comes from the naphtha node.
-    # "Waste CHP emissions" matches by prefix, so it holds port 3 of waste CHP CC too.
-    waste = value("Waste CHP emissions") + value("Waste CHP CC")
+    # Plain plants emit all of it; capture plants store part and emit the residual.
+    waste = value("Waste CHP emissions") + value("Waste CHP CC") + value("Waste CHP CC1")
     extras.append(("naphtha carbon to waste CHP", "naphtha carbon to waste CHP", "naphtha",
                    "Waste CHP", waste))
     extras.append((

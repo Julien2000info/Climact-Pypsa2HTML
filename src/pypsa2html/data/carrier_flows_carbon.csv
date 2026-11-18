@@ -51,6 +51,8 @@ OCGT,OCGT emissions,MtCO2,emmocgt
 SMR,SMR emissions,MtCO2,emmsmrsm
 urban central solid biomass CHP CC,urban central solid biomass CHP,MtCO2,emmbmchpcc
 urban central solid biomass CHP CC_2,urban central solid biomass CHP,MtCO2,emmbmchpatmcc
+renewable waste CHP CC,renewable waste CHP CC,MtCO2,emmrwstcc
+renewable waste CHP CC_2,renewable waste CHP CC,MtCO2,emmrwstccstm
 DAC,DAC,MtCO2,emmdac
 co2 sequestration,co2 sequestration,MtCO2,emmseq
 Electrobiofuels,Electrobiofuels,MtCO2,emmefuel

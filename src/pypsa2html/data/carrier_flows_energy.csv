@@ -161,6 +161,13 @@ methanolisation_4,electricity to methanol,TWh,pretareen
 solid biomass for industry CC_2,solid biomass for Industry cc losses,TWh,presenccfinddloss
 waste CHP_3,waste CHP losses,TWh,dz
 waste CHP CC_3,waste CHP CC losses,TWh,dzzz
+renewable waste CHP,renewable waste CHP,TWh,prbelcchpwstren
+urban central solar thermal,urban central solar thermal,TWh,prbrchsth
+renewable waste CHP CC,renewable waste CHP CC,TWh,prbelcchpwstren
+renewable waste CHP_2,renewable waste CHP to heat,TWh,prbvapchpwstren
+renewable waste CHP CC_2,renewable waste CHP CC to heat,TWh,prbvapchpwstren
+renewable waste CHP_3,renewable waste CHP losses,TWh,losschpwstren
+renewable waste CHP CC_3,renewable waste CHP CC losses,TWh,losschpwstren
 electrobiofuels_3,electrobiofuels H2,TWh,probmelcbioh
 naphtha for industry_4,naphtha losses,TWh,prespetcfproil
 coal for industry_2,coal for industry demand,TWh,cmscfinddem

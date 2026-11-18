@@ -63,6 +63,7 @@ _LABELS: tuple[tuple[str, str, str], ...] = (
     ("gas CHP", "Gas CHP", "Gas CHP"),
     ("solid biomass CHP CC", "Biomass CHP with capture", "Biomass CHP with capture"),
     ("solid biomass CHP", "Biomass CHP", "Biomass CHP"),
+    ("renewable waste CHP", "Renewable waste CHP", "Renewable waste CHP"),
     ("waste CHP", "Waste CHP", "Waste CHP"),
     ("CHP", "CHP", "CHP"),
     ("gas boiler", "Gas boiler", "Gas boiler (district)"),

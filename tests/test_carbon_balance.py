@@ -140,6 +140,23 @@ def test_waste_chp_carbon_comes_from_the_naphtha_node():
         25 * (MODEL_OIL - 0.0122) - 2 * 0.357)
 
 
+def test_waste_chp_capture_residual_is_booked_once():
+    """``waste CHP CC``: the residual (port 3) and the stored part (port 4) add up to the
+    naphtha carbon burned; the residual is not also counted as plain-plant emissions."""
+    n = _network()
+    n.add("Link", "A waste CHP CC", bus0="A HVC", bus1="A", bus2="", bus3="co2 atmosphere",
+          bus4="co2 stored", carrier="waste CHP CC", efficiency=0.2, efficiency3=0.036,
+          efficiency4=0.321)
+    for port, value in {"p0": 2.0, "p1": -0.4, "p2": 0.0, "p3": -2 * 0.036,
+                        "p4": -2 * 0.321}.items():
+        getattr(n.links_t, port)["A waste CHP CC"] = value
+    b = _balance_for_horizon(_ctx(n), "ALL", 2050).set_index("entry")["value"]
+    assert b.get("Waste CHP emissions", 0.0) == pytest.approx(0.0)
+    assert b["Waste CHP CC1"] == pytest.approx(2 * 0.036)
+    assert b["Waste CHP CC"] == pytest.approx(2 * 0.321)
+    assert b["naphtha carbon to waste CHP"] == pytest.approx(2 * (0.036 + 0.321))
+
+
 RUN = Path(__file__).resolve().parents[2] / "PyPSA-Eur-CANEU"
 RUN_NAME = "patex-levers2-nwe-bz-co2-cap-50-24h"
 

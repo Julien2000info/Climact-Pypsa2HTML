@@ -130,6 +130,10 @@ DOMESTIC_CARRIERS: tuple[str, ...] = (
     "bgl",
     "win",
     "wst",
+    # renewable waste (PyPSA-Eur-CANEU `patex.renewable_waste`): a domestic resource
+    "wst_ren",
+    # district solar thermal (`urban central solar thermal`)
+    "sth",
 )
 
 #: Primary energies whose supply is by definition imported.
@@ -1065,7 +1069,12 @@ def _close_energy_graph(ctx, node: str, flows: pd.DataFrame) -> pd.DataFrame:
     # -- 7. biomass: exogenous potential versus modelled consumption -------
     if not aggregate:
         potential = biomass_potential(ctx, node, list(years))
-        if potential is not None:
+        if potential is None:
+            # No potential file: the model's own supply is domestic production, as
+            # the log says. Without this the node had outputs and no input (EU28
+            # report 2026-11-18: every node's solid biomass unbalanced).
+            flows[("prod", "enc_pe", "")] = pe_supply.get("enc_pe", _zeros(years))
+        else:
             # A horizon with no potential file keeps the model's own value;
             # the négaWatt study ships none for its calibration year and the
             # original patched that up with a hardcoded ``.loc['2020']``.
